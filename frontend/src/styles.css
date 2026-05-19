@@ -308,6 +308,11 @@ img {
   width: 100%;
 }
 
+.sheet-page {
+  display: grid;
+  gap: 1rem;
+}
+
 .sheet-kicker {
   color: #f87171;
   font-size: 0.78rem;
@@ -362,6 +367,72 @@ img {
 
 .catalog-toolbar--sheet {
   margin-bottom: 1.2rem;
+}
+
+.sheet-modebar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sheet-modebar__copy {
+  max-width: 44rem;
+}
+
+.sheet-modebar__copy h1 {
+  margin: 0.2rem 0 0.45rem;
+  font-size: clamp(1.9rem, 3vw, 2.5rem);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+
+.sheet-modebar__copy p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.sheet-modebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.sheet-mode-button {
+  min-height: 2.4rem;
+  padding: 0 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.sheet-mode-button:hover,
+.sheet-mode-button.is-active {
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.sheet-frame-shell {
+  min-height: 78vh;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sheet-frame {
+  width: 100%;
+  min-height: 78vh;
+  border: 0;
+  background: #fff;
 }
 
 .catalog-table-shell--sheet {
@@ -1283,6 +1354,10 @@ img {
   .control-shell--search {
     width: 100%;
   }
+
+  .sheet-modebar {
+    align-items: stretch;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1310,6 +1385,11 @@ img {
 
   .relation-card {
     min-height: 6rem;
+  }
+
+  .sheet-frame-shell,
+  .sheet-frame {
+    min-height: 68vh;
   }
 }
 

@@ -9,6 +9,7 @@ const DEFAULT_ANILIST_BATCH_SIZE = 50;
 const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 5;
 const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
+const PROGRESS_PREFIX = "[mirror-build]";
 
 const ANILIST_MEDIA_QUERY = `
   query($ids:[Int],$page:Int,$perPage:Int){
@@ -71,12 +72,17 @@ async function main() {
   const force = args.force === "true";
 
   warnAniListCredentialMode(anilistAccessToken, anilistClientId, anilistClientSecret);
+  logStep(`Starting snapshot build${force ? " (forced)" : ""}.`);
 
   const startedAt = new Date().toISOString();
   const existingSnapshot = await loadExistingSnapshot(outputDir, statusUrl);
+  logStep("Fetching SeaDex list IDs...");
   const listIds = await fetchListIds(sourceBaseUrl);
+  logStep(`Fetched ${listIds.length} list IDs.`);
+  logStep(`Fetching upstream probe (${probeSize} recent rows)...`);
   const sourceProbe = await fetchSourceProbe(sourceBaseUrl, probeSize);
   const probeSignature = buildProbeSignature(listIds, sourceProbe.items);
+  logStep(`Computed upstream probe signature from ${sourceProbe.items.length} rows.`);
 
   if (!force && shouldSkipRebuild(existingSnapshot, probeSignature)) {
     console.log(
@@ -99,10 +105,16 @@ async function main() {
     return;
   }
 
+  logStep("Fetching full SeaDex entry snapshot...");
   const sourceSnapshot = await fetchSourceSnapshot(sourceBaseUrl, pageSize);
+  logStep(`Fetched ${sourceSnapshot.entries.length} deduplicated entries.`);
 
   validateSourceSnapshot(listIds, sourceSnapshot.entries);
+  logStep("Source parity checks passed.");
 
+  logStep(
+    `Fetching AniList metadata for ${sourceSnapshot.entries.length} entries in batches of ${anilistBatchSize} with ${anilistDelayMs}ms pacing...`,
+  );
   const anilistMedia = await fetchAniListSnapshot(
     anilistUrl,
     sourceSnapshot.entries.map((entry) => entry.alID),
@@ -112,8 +124,10 @@ async function main() {
     anilistAccessToken,
     existingSnapshot?.aniListCache ?? new Map(),
   );
+  logStep(`Resolved AniList metadata for ${anilistMedia.size} entries.`);
 
   const finishedAt = new Date().toISOString();
+  logStep("Composing static snapshot payloads...");
   const snapshot = buildStaticSnapshot({
     sourceBaseUrl,
     startedAt,
@@ -125,7 +139,9 @@ async function main() {
     probeSignature,
   });
 
+  logStep(`Writing snapshot files to ${outputDir}...`);
   await writeSnapshot(outputDir, snapshot);
+  logStep("Snapshot files written successfully.");
 
   console.log(
     JSON.stringify(
@@ -233,18 +249,18 @@ function shouldSkipRebuild(existingSnapshot, nextProbeSignature) {
 
 function warnAniListCredentialMode(accessToken, clientId, clientSecret) {
   if (accessToken) {
-    console.log("AniList mode: authenticated bearer token.");
+    logStep("AniList mode: authenticated bearer token.");
     return;
   }
 
   if (clientId || clientSecret) {
     console.warn(
-      "AniList mode: public GraphQL. AniList removed the client-credentials grant for public API data, so client ID/secret alone cannot authenticate snapshot fetches.",
+      `${PROGRESS_PREFIX} AniList mode: public GraphQL. AniList removed the client-credentials grant for public API data, so client ID/secret alone cannot authenticate snapshot fetches.`,
     );
     return;
   }
 
-  console.log("AniList mode: public GraphQL.");
+  logStep("AniList mode: public GraphQL.");
 }
 
 async function writeSnapshot(outputDir, snapshot) {
@@ -257,8 +273,14 @@ async function writeSnapshot(outputDir, snapshot) {
   await writeJson(join(outputDir, "catalog.json"), snapshot.catalog);
   await writeJson(join(outputDir, "sheet.json"), snapshot.sheet);
 
+  let written = 0;
+  const total = snapshot.entries.size;
   for (const [alId, payload] of snapshot.entries) {
     await writeJson(join(entriesDir, `${alId}.json`), payload);
+    written += 1;
+    if (written % 250 === 0 || written === total) {
+      logStep(`Wrote ${written}/${total} entry files...`);
+    }
   }
 }
 
@@ -471,6 +493,10 @@ function buildSearchText(entry, media) {
     .trim();
 }
 
+function uniqueReleaseGroups(torrents) {
+  return [...new Set(torrents.map((torrent) => torrent?.releaseGroup ?? "").filter(Boolean))].slice(0, 2);
+}
+
 function compareTorrentRows(left, right) {
   return (
     compareNumbers(right.isBest === true ? 1 : 0, left.isBest === true ? 1 : 0) ||
@@ -552,6 +578,7 @@ async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
     const payload = await response.json();
     const items = payload.items ?? [];
     entries.push(...items);
+    logStep(`Fetched source page ${page} with ${items.length} rows (${entries.length} accumulated).`);
 
     if (items.length < pageSize) {
       break;
@@ -617,6 +644,7 @@ async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimi
 
   for (const [index, batch] of batches.entries()) {
     let payload;
+    logStep(`AniList batch ${index + 1}/${batches.length} starting (${batch.length} ids).`);
 
     try {
       payload = await withRetry(
@@ -648,8 +676,10 @@ async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimi
     for (const media of payload) {
       mediaMap.set(media.id, media);
     }
+    logStep(`AniList batch ${index + 1}/${batches.length} finished (${payload.length} records, ${mediaMap.size} total).`);
 
     if (index < batches.length - 1 && delayMs > 0) {
+      logStep(`Waiting ${delayMs}ms before next AniList batch...`);
       await sleep(delayMs);
     }
   }
@@ -818,6 +848,10 @@ function sleep(ms) {
   return new Promise((resolvePromise) => {
     setTimeout(resolvePromise, ms);
   });
+}
+
+function logStep(message) {
+  console.log(`${PROGRESS_PREFIX} ${message}`);
 }
 
 main().catch((error) => {

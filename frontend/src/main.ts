@@ -17,6 +17,8 @@ const THEME_KEY = "seadex-mirror-theme";
 const UPSTREAM_SITE_URL = "https://releases.moe/";
 const UPSTREAM_ABOUT_URL = "https://releases.moe/about/";
 const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
+const UPSTREAM_SHEET_EMBED_URL =
+  "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/htmlview";
 const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
 
 type RouteContext =
@@ -337,6 +339,7 @@ async function renderCatalog(status: MirrorStatus) {
 async function renderSheet(status: MirrorStatus) {
   const sheet = await loadSheetPayload();
   const state = readCatalogStateFromUrl();
+  let sheetView: "live" | "backup" = readSheetViewFromUrl();
 
   appRoot.innerHTML = renderPageFrame(
     status,
@@ -344,8 +347,35 @@ async function renderSheet(status: MirrorStatus) {
     `
       <main class="page page--sheet">
         <section class="sheet-page">
-          <div class="catalog-toolbar catalog-toolbar--sheet">
-            <div class="catalog-toolbar__group catalog-toolbar__group--grow">
+          <div class="sheet-modebar">
+            <div class="sheet-modebar__copy">
+              <p class="sheet-kicker">Sheet</p>
+              <h1>SeaDex sheet mirror</h1>
+              <p>Live embedded sheet by default, with a local backup table when the upstream embed is unavailable.</p>
+            </div>
+            <div class="sheet-modebar__actions">
+              <button id="sheet-live-tab" class="sheet-mode-button${sheetView === "live" ? " is-active" : ""}" type="button">Live sheet</button>
+              <button id="sheet-backup-tab" class="sheet-mode-button${sheetView === "backup" ? " is-active" : ""}" type="button">Mirror backup</button>
+              <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
+                <span>${renderExternalIcon()}</span>
+                <span>Open upstream</span>
+              </a>
+            </div>
+          </div>
+
+          <section id="sheet-live-panel" class="sheet-frame-shell"${sheetView === "backup" ? " hidden" : ""}>
+            <iframe
+              class="sheet-frame"
+              src="${escapeHtml(UPSTREAM_SHEET_EMBED_URL)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              title="SeaDex sheet embed"
+            ></iframe>
+          </section>
+
+          <section id="sheet-backup-panel"${sheetView === "live" ? " hidden" : ""}>
+            <div class="catalog-toolbar catalog-toolbar--sheet">
+              <div class="catalog-toolbar__group catalog-toolbar__group--grow">
               <label class="control-shell control-shell--search" for="sheet-search">
                 ${renderSearchIcon()}
                 <input id="sheet-search" class="control-input" type="search" placeholder="Filter titles..." value="${escapeHtml(state.search)}" autocomplete="off" />
@@ -359,7 +389,7 @@ async function renderSheet(status: MirrorStatus) {
                 </select>
               </label>
             </div>
-            <div class="catalog-toolbar__group">
+              <div class="catalog-toolbar__group">
               <label class="sheet-pill-select">
                 ${renderMixerIcon()}
                 <span>View</span>
@@ -371,50 +401,51 @@ async function renderSheet(status: MirrorStatus) {
                 </select>
               </label>
             </div>
-          </div>
-
-          <section class="catalog-table-shell catalog-table-shell--sheet">
-            <div class="catalog-table-shell__scroll">
-              <table class="catalog-table catalog-table--sheet" aria-label="SeaDex mirror sheet">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Format</th>
-                    <th>Year</th>
-                    <th>Episodes</th>
-                    <th>Best</th>
-                    <th>Alt</th>
-                    <th>Updated</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="sheet-body"></tbody>
-              </table>
             </div>
-            <div id="sheet-mobile" class="catalog-mobile"></div>
-          </section>
 
-          <div class="catalog-footer">
-            <div class="catalog-footer__summary" id="sheet-summary">Loading rows...</div>
-            <div class="catalog-footer__controls">
-              <label class="rows-control">
-                <span>Rows per page</span>
-                <select id="sheet-limit">
-                  <option value="15"${state.limit === 15 ? " selected" : ""}>15</option>
-                  <option value="30"${state.limit === 30 ? " selected" : ""}>30</option>
-                  <option value="60"${state.limit === 60 ? " selected" : ""}>60</option>
-                  <option value="90"${state.limit === 90 ? " selected" : ""}>90</option>
-                </select>
-              </label>
-              <div class="page-indicator" id="sheet-indicator">Page 1 of 1</div>
-              <div class="pager">
-                <button id="sheet-first" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to first page">${renderDoubleChevronLeftIcon()}</button>
-                <button id="sheet-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
-                <button id="sheet-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
-                <button id="sheet-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
+            <section class="catalog-table-shell catalog-table-shell--sheet">
+              <div class="catalog-table-shell__scroll">
+                <table class="catalog-table catalog-table--sheet" aria-label="SeaDex mirror sheet backup">
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Format</th>
+                      <th>Year</th>
+                      <th>Episodes</th>
+                      <th>Best</th>
+                      <th>Alt</th>
+                      <th>Updated</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="sheet-body"></tbody>
+                </table>
+              </div>
+              <div id="sheet-mobile" class="catalog-mobile"></div>
+            </section>
+
+            <div class="catalog-footer">
+              <div class="catalog-footer__summary" id="sheet-summary">Loading rows...</div>
+              <div class="catalog-footer__controls">
+                <label class="rows-control">
+                  <span>Rows per page</span>
+                  <select id="sheet-limit">
+                    <option value="15"${state.limit === 15 ? " selected" : ""}>15</option>
+                    <option value="30"${state.limit === 30 ? " selected" : ""}>30</option>
+                    <option value="60"${state.limit === 60 ? " selected" : ""}>60</option>
+                    <option value="90"${state.limit === 90 ? " selected" : ""}>90</option>
+                  </select>
+                </label>
+                <div class="page-indicator" id="sheet-indicator">Page 1 of 1</div>
+                <div class="pager">
+                  <button id="sheet-first" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to first page">${renderDoubleChevronLeftIcon()}</button>
+                  <button id="sheet-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
+                  <button id="sheet-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
+                  <button id="sheet-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
         </section>
       </main>
       ${renderSearchDialog()}
@@ -423,6 +454,10 @@ async function renderSheet(status: MirrorStatus) {
 
   wireCommonUi(status, "sheet");
 
+  const liveTab = query<HTMLButtonElement>("#sheet-live-tab");
+  const backupTab = query<HTMLButtonElement>("#sheet-backup-tab");
+  const livePanel = query<HTMLElement>("#sheet-live-panel");
+  const backupPanel = query<HTMLElement>("#sheet-backup-panel");
   const searchInput = query<HTMLInputElement>("#sheet-search");
   const formatSelect = query<HTMLSelectElement>("#sheet-format");
   const sortSelect = query<HTMLSelectElement>("#sheet-sort");
@@ -437,6 +472,15 @@ async function renderSheet(status: MirrorStatus) {
   const lastButton = query<HTMLButtonElement>("#sheet-last");
 
   let currentPayload: ReturnType<typeof filterSheetItems> | null = null;
+
+  const applySheetView = (nextView: "live" | "backup") => {
+    sheetView = nextView;
+    livePanel.hidden = nextView !== "live";
+    backupPanel.hidden = nextView !== "backup";
+    liveTab.classList.toggle("is-active", nextView === "live");
+    backupTab.classList.toggle("is-active", nextView === "backup");
+    syncSheetStateToUrl(state, nextView);
+  };
 
   const renderPage = () => {
     state.search = searchInput.value.trim();
@@ -534,6 +578,7 @@ async function renderSheet(status: MirrorStatus) {
     nextButton.disabled = payload.pagination.nextOffset === null;
     lastButton.disabled = currentPage >= totalPages;
 
+    syncSheetStateToUrl(state, sheetView);
     wireCatalogActions(body, mobile);
   };
 
@@ -558,7 +603,7 @@ async function renderSheet(status: MirrorStatus) {
   });
 
   nextButton.addEventListener("click", () => {
-    if (!currentPayload?.pagination.nextOffset) {
+    if (currentPayload?.pagination.nextOffset === null || currentPayload?.pagination.nextOffset === undefined) {
       return;
     }
     state.offset = currentPayload.pagination.nextOffset;
@@ -574,6 +619,15 @@ async function renderSheet(status: MirrorStatus) {
     renderPage();
   });
 
+  liveTab.addEventListener("click", () => {
+    applySheetView("live");
+  });
+
+  backupTab.addEventListener("click", () => {
+    applySheetView("backup");
+  });
+
+  applySheetView(sheetView);
   renderPage();
 }
 
@@ -1282,6 +1336,11 @@ function readCatalogStateFromUrl(): CatalogState {
   };
 }
 
+function readSheetViewFromUrl(): "live" | "backup" {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("sheetView") === "backup" ? "backup" : "live";
+}
+
 function syncCatalogStateToUrl(state: CatalogState) {
   const params = new URLSearchParams();
   if (state.search) {
@@ -1305,6 +1364,32 @@ function syncCatalogStateToUrl(state: CatalogState) {
 
   const query = params.toString();
   const nextUrl = query ? `/?${query}` : "/";
+  window.history.replaceState(null, "", nextUrl);
+}
+
+function syncSheetStateToUrl(state: CatalogState, sheetView: "live" | "backup") {
+  const params = new URLSearchParams();
+  if (sheetView === "backup") {
+    params.set("sheetView", "backup");
+  }
+  if (state.search) {
+    params.set("q", state.search);
+  }
+  if (state.format) {
+    params.set("format", state.format);
+  }
+  if (state.sort !== "updated") {
+    params.set("sort", state.sort);
+  }
+  if (state.limit !== DEFAULT_PAGE_SIZE) {
+    params.set("limit", String(state.limit));
+  }
+  if (state.offset > 0) {
+    params.set("page", String(Math.floor(state.offset / state.limit) + 1));
+  }
+
+  const query = params.toString();
+  const nextUrl = query ? `/sheet?${query}` : "/sheet";
   window.history.replaceState(null, "", nextUrl);
 }
 
