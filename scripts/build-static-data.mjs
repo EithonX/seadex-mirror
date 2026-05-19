@@ -5,8 +5,8 @@ const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const DEFAULT_SOURCE_PAGE_SIZE = 100;
 const DEFAULT_SOURCE_PROBE_SIZE = 8;
-const DEFAULT_ANILIST_BATCH_SIZE = 25;
-const DEFAULT_ANILIST_DELAY_MS = 800;
+const DEFAULT_ANILIST_BATCH_SIZE = 50;
+const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 5;
 const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
 
@@ -64,9 +64,13 @@ async function main() {
   const anilistDelayMs = parsePositiveInt(args.delayMs, DEFAULT_ANILIST_DELAY_MS);
   const retryLimit = parsePositiveInt(args.retryLimit, DEFAULT_RETRY_LIMIT);
   const anilistAccessToken = args.anilistToken ?? process.env.ANILIST_ACCESS_TOKEN ?? "";
+  const anilistClientId = args.anilistClientId ?? process.env.ANILIST_CLIENT_ID ?? "";
+  const anilistClientSecret = args.anilistClientSecret ?? process.env.ANILIST_CLIENT_SECRET ?? "";
   const statusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
   const force = args.force === "true";
+
+  warnAniListCredentialMode(anilistAccessToken, anilistClientId, anilistClientSecret);
 
   const startedAt = new Date().toISOString();
   const existingSnapshot = await loadExistingSnapshot(outputDir, statusUrl);
@@ -225,6 +229,22 @@ async function loadExistingAniListCache(entriesDir) {
 function shouldSkipRebuild(existingSnapshot, nextProbeSignature) {
   const previousSignature = existingSnapshot?.status?.sync?.summary?.upstreamProbe?.signature ?? null;
   return Boolean(previousSignature && previousSignature === nextProbeSignature);
+}
+
+function warnAniListCredentialMode(accessToken, clientId, clientSecret) {
+  if (accessToken) {
+    console.log("AniList mode: authenticated bearer token.");
+    return;
+  }
+
+  if (clientId || clientSecret) {
+    console.warn(
+      "AniList mode: public GraphQL. AniList removed the client-credentials grant for public API data, so client ID/secret alone cannot authenticate snapshot fetches.",
+    );
+    return;
+  }
+
+  console.log("AniList mode: public GraphQL.");
 }
 
 async function writeSnapshot(outputDir, snapshot) {

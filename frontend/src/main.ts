@@ -348,7 +348,7 @@ async function renderSheet(status: MirrorStatus) {
             <div class="catalog-toolbar__group catalog-toolbar__group--grow">
               <label class="control-shell control-shell--search" for="sheet-search">
                 ${renderSearchIcon()}
-                <input id="sheet-search" class="control-input" type="search" placeholder="Search sheet..." value="${escapeHtml(state.search)}" autocomplete="off" />
+                <input id="sheet-search" class="control-input" type="search" placeholder="Filter titles..." value="${escapeHtml(state.search)}" autocomplete="off" />
               </label>
               <label class="sheet-pill-select sheet-pill-select--dashed">
                 ${renderPlusCircledIcon()}
@@ -362,7 +362,7 @@ async function renderSheet(status: MirrorStatus) {
             <div class="catalog-toolbar__group">
               <label class="sheet-pill-select">
                 ${renderMixerIcon()}
-                <span>Sort</span>
+                <span>View</span>
                 <select id="sheet-sort">
                   <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
                   <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
@@ -381,10 +381,11 @@ async function renderSheet(status: MirrorStatus) {
                     <th>Title</th>
                     <th>Format</th>
                     <th>Year</th>
+                    <th>Episodes</th>
                     <th>Best</th>
                     <th>Alt</th>
-                    <th>Notes</th>
                     <th>Updated</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody id="sheet-body"></tbody>
@@ -392,6 +393,28 @@ async function renderSheet(status: MirrorStatus) {
             </div>
             <div id="sheet-mobile" class="catalog-mobile"></div>
           </section>
+
+          <div class="catalog-footer">
+            <div class="catalog-footer__summary" id="sheet-summary">Loading rows...</div>
+            <div class="catalog-footer__controls">
+              <label class="rows-control">
+                <span>Rows per page</span>
+                <select id="sheet-limit">
+                  <option value="15"${state.limit === 15 ? " selected" : ""}>15</option>
+                  <option value="30"${state.limit === 30 ? " selected" : ""}>30</option>
+                  <option value="60"${state.limit === 60 ? " selected" : ""}>60</option>
+                  <option value="90"${state.limit === 90 ? " selected" : ""}>90</option>
+                </select>
+              </label>
+              <div class="page-indicator" id="sheet-indicator">Page 1 of 1</div>
+              <div class="pager">
+                <button id="sheet-first" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to first page">${renderDoubleChevronLeftIcon()}</button>
+                <button id="sheet-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
+                <button id="sheet-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
+                <button id="sheet-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
+              </div>
+            </div>
+          </div>
         </section>
       </main>
       ${renderSearchDialog()}
@@ -403,21 +426,34 @@ async function renderSheet(status: MirrorStatus) {
   const searchInput = query<HTMLInputElement>("#sheet-search");
   const formatSelect = query<HTMLSelectElement>("#sheet-format");
   const sortSelect = query<HTMLSelectElement>("#sheet-sort");
+  const limitSelect = query<HTMLSelectElement>("#sheet-limit");
   const body = query<HTMLTableSectionElement>("#sheet-body");
   const mobile = query<HTMLDivElement>("#sheet-mobile");
+  const summary = query<HTMLDivElement>("#sheet-summary");
+  const indicator = query<HTMLDivElement>("#sheet-indicator");
+  const firstButton = query<HTMLButtonElement>("#sheet-first");
+  const previousButton = query<HTMLButtonElement>("#sheet-prev");
+  const nextButton = query<HTMLButtonElement>("#sheet-next");
+  const lastButton = query<HTMLButtonElement>("#sheet-last");
 
-  const renderRows = () => {
+  let currentPayload: ReturnType<typeof filterSheetItems> | null = null;
+
+  const renderPage = () => {
     state.search = searchInput.value.trim();
     state.format = formatSelect.value;
     state.sort = sortSelect.value;
-    state.limit = 5000;
-    state.offset = 0;
+    state.limit = clampLimit(limitSelect.value);
 
     const payload = filterSheetItems(sheet.items, state);
+    currentPayload = payload;
+    state.offset = payload.filters.offset;
+    const totalPages = Math.max(1, Math.ceil(payload.pagination.total / state.limit));
+    const currentPage = Math.floor(payload.filters.offset / state.limit) + 1;
 
-    body.innerHTML = payload
-      .map(
-        (item) => `
+    body.innerHTML = payload.items.length
+      ? payload.items
+          .map(
+            (item) => `
           <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
             <td>
               <div class="catalog-title">
@@ -427,23 +463,45 @@ async function renderSheet(status: MirrorStatus) {
             </td>
             <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
             <td>${item.year ?? "-"}</td>
-            <td class="sheet-groups">${escapeHtml(item.bestGroups.join(" / ") || (item.bestCount ? `${item.bestCount} release${item.bestCount === 1 ? "" : "s"}` : ""))}</td>
-            <td class="sheet-groups">${escapeHtml(item.altGroups.join(" / ") || (item.altCount ? `${item.altCount} release${item.altCount === 1 ? "" : "s"}` : ""))}</td>
-            <td class="sheet-notes">${escapeHtml(item.excerpt ?? "")}</td>
+            <td>${item.episodes ?? "-"}</td>
+            <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</td>
+            <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</td>
             <td>${formatDate(item.updatedAt)}</td>
+            <td class="catalog-row__actions">
+              <div class="row-menu-shell">
+                <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-row-menu-${item.alId}">
+                  ${renderDotsIcon()}
+                </button>
+                <div id="sheet-row-menu-${item.alId}" class="row-menu" hidden>
+                  <a href="/${item.alId}">Open entry</a>
+                  <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+                  <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
+                </div>
+              </div>
+            </td>
           </tr>
         `,
-      )
-      .join("");
+          )
+          .join("")
+      : `<tr><td class="catalog-empty" colspan="8">No entries matched that sheet filter.</td></tr>`;
 
-    mobile.innerHTML = payload
-      .map(
-        (item) => `
+    mobile.innerHTML = payload.items.length
+      ? payload.items
+          .map(
+            (item) => `
           <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
             <div class="catalog-card__top">
               <div class="catalog-card__title">
                 <strong>${escapeHtml(item.title)}</strong>
                 ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+              </div>
+              <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-mobile-row-menu-${item.alId}">
+                ${renderDotsIcon()}
+              </button>
+              <div id="sheet-mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
+                <a href="/${item.alId}">Open entry</a>
+                <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+                <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
               </div>
             </div>
             <div class="catalog-card__meta">
@@ -454,28 +512,69 @@ async function renderSheet(status: MirrorStatus) {
             <dl class="catalog-card__groups">
               <div>
                 <dt>Best</dt>
-                <dd>${escapeHtml(item.bestGroups.join(" / ") || (item.bestCount ? `${item.bestCount} release${item.bestCount === 1 ? "" : "s"}` : "None"))}</dd>
+                <dd>${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</dd>
               </div>
               <div>
                 <dt>Alt</dt>
-                <dd>${escapeHtml(item.altGroups.join(" / ") || (item.altCount ? `${item.altCount} release${item.altCount === 1 ? "" : "s"}` : "None"))}</dd>
+                <dd>${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</dd>
               </div>
             </dl>
             ${item.excerpt ? `<p class="sheet-mobile-notes">${escapeHtml(item.excerpt)}</p>` : ""}
             <div class="catalog-card__footer">Updated ${formatDate(item.updatedAt)}</div>
           </article>
         `,
-      )
-      .join("");
+          )
+          .join("")
+      : `<div class="catalog-empty catalog-empty--mobile">No entries matched that sheet filter.</div>`;
+
+    summary.textContent = `${payload.pagination.count} row(s) loaded.`;
+    indicator.textContent = `Page ${currentPage} of ${totalPages}`;
+    firstButton.disabled = state.offset === 0;
+    previousButton.disabled = state.offset === 0;
+    nextButton.disabled = payload.pagination.nextOffset === null;
+    lastButton.disabled = currentPage >= totalPages;
 
     wireCatalogActions(body, mobile);
   };
 
-  const debouncedRender = debounce(renderRows, 100);
-  searchInput.addEventListener("input", debouncedRender);
-  formatSelect.addEventListener("change", renderRows);
-  sortSelect.addEventListener("change", renderRows);
-  renderRows();
+  const rerenderFromTop = () => {
+    state.offset = 0;
+    renderPage();
+  };
+
+  searchInput.addEventListener("input", debounce(rerenderFromTop, 100));
+  formatSelect.addEventListener("change", rerenderFromTop);
+  sortSelect.addEventListener("change", rerenderFromTop);
+  limitSelect.addEventListener("change", rerenderFromTop);
+
+  firstButton.addEventListener("click", () => {
+    state.offset = 0;
+    renderPage();
+  });
+
+  previousButton.addEventListener("click", () => {
+    state.offset = Math.max(0, state.offset - state.limit);
+    renderPage();
+  });
+
+  nextButton.addEventListener("click", () => {
+    if (!currentPayload?.pagination.nextOffset) {
+      return;
+    }
+    state.offset = currentPayload.pagination.nextOffset;
+    renderPage();
+  });
+
+  lastButton.addEventListener("click", () => {
+    if (!currentPayload) {
+      return;
+    }
+    const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
+    state.offset = (totalPages - 1) * state.limit;
+    renderPage();
+  });
+
+  renderPage();
 }
 
 function renderAbout(status: MirrorStatus) {
@@ -1219,7 +1318,7 @@ function filterSeason(items: CatalogIndexItem[], seasonFilter: string) {
 
 function filterSheetItems(
   items: SheetPayload["items"],
-  state: Pick<CatalogState, "search" | "format" | "sort">,
+  state: Pick<CatalogState, "search" | "format" | "sort" | "limit" | "offset">,
 ) {
   const search = state.search.trim().toLowerCase();
   const format = state.format.trim().toUpperCase();
@@ -1233,7 +1332,7 @@ function filterSheetItems(
     filtered = filtered.filter((item) => (item.format ?? "").toUpperCase() === format);
   }
 
-  return [...filtered].sort((left, right) => {
+  const sorted = [...filtered].sort((left, right) => {
     switch (state.sort) {
       case "title":
         return left.title.localeCompare(right.title) || left.alId - right.alId;
@@ -1245,6 +1344,37 @@ function filterSheetItems(
         return Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.title.localeCompare(right.title);
     }
   });
+
+  const limit = Math.max(1, state.limit);
+  const offset = Math.max(0, Math.min(state.offset, Math.max(0, sorted.length - 1)));
+  const pageItems = sorted.slice(offset, offset + limit);
+  const nextOffset = offset + limit < sorted.length ? offset + limit : null;
+
+  return {
+    filters: {
+      search: state.search,
+      format: state.format,
+      sort: state.sort,
+      limit,
+      offset,
+    },
+    pagination: {
+      count: pageItems.length,
+      total: sorted.length,
+      nextOffset,
+    },
+    items: pageItems,
+  };
+}
+
+function formatSheetGroupLabel(groups: string[], count: number) {
+  if (groups.length > 0) {
+    return groups.join(" / ");
+  }
+  if (count > 0) {
+    return `${count} release${count === 1 ? "" : "s"}`;
+  }
+  return "None";
 }
 
 function buildSeasonOptions(items: CatalogIndexItem[]) {
@@ -1374,7 +1504,7 @@ async function loadSheetPayload(): Promise<SheetPayload> {
   try {
     return await fetchJson<SheetPayload>(`${DATA_ROOT}/sheet.json`);
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("Mirror data is missing")) {
+    if (!isMirrorDataMissingError(error)) {
       throw error;
     }
 
@@ -1419,7 +1549,28 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new Error(message || `Request failed with ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = await response.text();
+
+  if (url.startsWith(DATA_ROOT) && contentType.includes("text/html")) {
+    throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
+  }
+
+  try {
+    return JSON.parse(body) as T;
+  } catch (error) {
+    if (url.startsWith(DATA_ROOT) && /^\s*<!doctype html/i.test(body)) {
+      throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
+    }
+
+    throw new Error(
+      error instanceof Error ? `Invalid JSON returned from ${url}: ${error.message}` : `Invalid JSON returned from ${url}.`,
+    );
+  }
+}
+
+function isMirrorDataMissingError(error: unknown) {
+  return error instanceof Error && error.message.includes("Mirror data is missing");
 }
 
 function applySavedTheme() {

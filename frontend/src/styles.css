@@ -368,6 +368,10 @@ img {
   background: rgba(18, 19, 22, 0.88);
 }
 
+.catalog-table--sheet {
+  min-width: 980px;
+}
+
 .catalog-table--sheet th,
 .catalog-table--sheet td {
   padding-top: 0.7rem;
@@ -1287,7 +1291,8 @@ img {
     padding-top: 1rem;
   }
 
-  .page--catalog .catalog-table-shell__scroll {
+  .page--catalog .catalog-table-shell__scroll,
+  .page--sheet .catalog-table-shell__scroll {
     display: none;
   }
 
@@ -1301,10 +1306,6 @@ img {
 
   .ghost-icon-button--desktop {
     display: none;
-  }
-
-  .catalog-table--sheet {
-    min-width: 760px;
   }
 
   .relation-card {
