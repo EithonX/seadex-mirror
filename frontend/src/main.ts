@@ -282,8 +282,11 @@ async function renderEntry(status: MirrorStatus, alId: number) {
 
   appRoot.innerHTML = `
     ${renderShell(status, "entry")}
-    <main class="page page--entry">
-      <a class="back-link" href="/">Return to catalog</a>
+    <main class="page page--entry animate-in">
+      <a class="back-link" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Return to catalog
+      </a>
       <section class="entry-hero">
         <div class="entry-poster">
           ${
@@ -307,10 +310,16 @@ async function renderEntry(status: MirrorStatus, alId: number) {
             ${entry.incomplete ? chip("Marked incomplete") : ""}
           </div>
           <div class="entry-actions">
-            <a class="button button--primary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">Open original SeaDex entry</a>
+            <a class="button button--primary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
+              Open original SeaDex entry
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
             ${
               entry.comparisonLinks[0]
-                ? `<a class="button button--quiet" href="${escapeHtml(entry.comparisonLinks[0])}" target="_blank" rel="noreferrer">Open comparison</a>`
+                ? `<a class="button button--quiet" href="${escapeHtml(entry.comparisonLinks[0])}" target="_blank" rel="noreferrer">
+                    Open comparison
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                   </a>`
                 : ""
             }
           </div>
@@ -397,7 +406,7 @@ function renderStatusBand(status: MirrorStatus) {
 
 function renderCatalogEntry(item: CatalogItem) {
   return `
-    <article class="result">
+    <article class="result animate-in" style="animation-delay: ${Math.random() * 0.15}s;">
       <a class="result__link" href="/${item.alId}">
         <div class="result__poster">
           ${
@@ -431,7 +440,7 @@ function renderCatalogEntry(item: CatalogItem) {
 function renderTorrentRow(torrent: EntryPayload["torrents"][number]) {
   const primaryUrl = torrent.url ?? torrent.groupedUrl ?? null;
   return `
-    <article class="torrent-row">
+    <article class="torrent-row animate-in" style="animation-delay: ${Math.random() * 0.15}s;">
       <div class="torrent-row__main">
         <div class="torrent-row__topline">
           <h3>${escapeHtml(torrent.releaseGroup || "Unknown group")}</h3>
@@ -449,7 +458,10 @@ function renderTorrentRow(torrent: EntryPayload["torrents"][number]) {
       <div class="torrent-row__actions">
         ${
           primaryUrl
-            ? `<a class="button button--primary" href="${escapeHtml(primaryUrl)}" target="_blank" rel="noreferrer">Open torrent</a>`
+            ? `<a class="button button--primary" href="${escapeHtml(primaryUrl)}" target="_blank" rel="noreferrer">
+                 Open torrent
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+               </a>`
             : `<span class="button button--ghost">No source link</span>`
         }
         ${torrent.infoHash ? `<code>${escapeHtml(torrent.infoHash)}</code>` : `<span class="muted">Info hash redacted</span>`}
@@ -471,8 +483,8 @@ function renderFatal(message: string) {
   `;
 }
 
-function chip(label: string) {
-  return `<span class="chip">${escapeHtml(label)}</span>`;
+function chip(label: string, iconHtml: string = "") {
+  return `<span class="chip">${iconHtml}${escapeHtml(label)}</span>`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
