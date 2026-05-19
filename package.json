@@ -8,7 +8,8 @@
     "data:build": "node scripts/build-static-data.mjs",
     "dev": "vite",
     "dev:pages": "wrangler pages dev dist",
-    "deploy": "npm run build:site && wrangler pages deploy dist",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "deploy:full": "npm run build:site && wrangler pages deploy dist",
     "typecheck": "tsc -p tsconfig.frontend.json --noEmit"
   },
   "devDependencies": {
