@@ -80,6 +80,32 @@ export type CatalogPayload = {
   items: CatalogItem[];
 };
 
+export type SheetItem = {
+  alId: number;
+  recordId: string;
+  title: string;
+  format: string | null;
+  status: string | null;
+  year: number | null;
+  episodes: number | null;
+  averageScore: number | null;
+  incomplete: boolean;
+  comparisonCount: number;
+  torrentCount: number;
+  bestCount: number;
+  altCount: number;
+  bestGroups: string[];
+  altGroups: string[];
+  excerpt: string | null;
+  updatedAt: string;
+  searchText: string;
+};
+
+export type SheetPayload = {
+  generatedAt: string;
+  items: SheetItem[];
+};
+
 export type EntryPayload = {
   source: {
     originalSite: string;

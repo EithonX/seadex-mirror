@@ -7,14 +7,23 @@ import {
   type CatalogPayload,
   type EntryPayload,
   type MirrorStatus,
+  type SheetPayload,
 } from "../../shared/mirror";
 
 const DATA_ROOT = "/mirror-data";
 const DEFAULT_PAGE_SIZE = 30;
 const SEARCH_RESULTS_LIMIT = 10;
 const THEME_KEY = "seadex-mirror-theme";
+const UPSTREAM_SITE_URL = "https://releases.moe/";
+const UPSTREAM_ABOUT_URL = "https://releases.moe/about/";
+const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
+const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
 
-type RouteContext = { kind: "index" } | { kind: "entry"; alId: number };
+type RouteContext =
+  | { kind: "index" }
+  | { kind: "about" }
+  | { kind: "sheet" }
+  | { kind: "entry"; alId: number };
 
 type CatalogState = {
   search: string;
@@ -51,18 +60,37 @@ async function boot() {
   const status = await fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
   const route = parseRoute(window.location.pathname);
 
-  if (route.kind === "index") {
-    await renderCatalog(status);
-    return;
+  switch (route.kind) {
+    case "index":
+      setDocumentMeta("SeaDex Mirror");
+      await renderCatalog(status);
+      return;
+    case "about":
+      setDocumentMeta("About | SeaDex Mirror");
+      renderAbout(status);
+      return;
+    case "sheet":
+      setDocumentMeta("Sheet | SeaDex Mirror");
+      await renderSheet(status);
+      return;
+    case "entry":
+      await renderEntry(status, route.alId);
+      return;
   }
-
-  await renderEntry(status, route.alId);
 }
 
 function parseRoute(pathname: string): RouteContext {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/") {
     return { kind: "index" };
+  }
+
+  if (normalized === "/about") {
+    return { kind: "about" };
+  }
+
+  if (normalized === "/sheet") {
+    return { kind: "sheet" };
   }
 
   const match = normalized.match(/^\/(\d+)$/);
@@ -306,6 +334,211 @@ async function renderCatalog(status: MirrorStatus) {
   renderPage();
 }
 
+async function renderSheet(status: MirrorStatus) {
+  const sheet = await loadSheetPayload();
+  const state = readCatalogStateFromUrl();
+
+  appRoot.innerHTML = renderPageFrame(
+    status,
+    "sheet",
+    `
+      <main class="page page--sheet">
+        <section class="sheet-page">
+          <div class="catalog-toolbar catalog-toolbar--sheet">
+            <div class="catalog-toolbar__group catalog-toolbar__group--grow">
+              <label class="control-shell control-shell--search" for="sheet-search">
+                ${renderSearchIcon()}
+                <input id="sheet-search" class="control-input" type="search" placeholder="Search sheet..." value="${escapeHtml(state.search)}" autocomplete="off" />
+              </label>
+              <label class="sheet-pill-select sheet-pill-select--dashed">
+                ${renderPlusCircledIcon()}
+                <span>Format</span>
+                <select id="sheet-format">
+                  <option value="">All formats</option>
+                  ${renderFormatOptions(state.format)}
+                </select>
+              </label>
+            </div>
+            <div class="catalog-toolbar__group">
+              <label class="sheet-pill-select">
+                ${renderMixerIcon()}
+                <span>Sort</span>
+                <select id="sheet-sort">
+                  <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
+                  <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
+                  <option value="year"${state.sort === "year" ? " selected" : ""}>Newest year</option>
+                  <option value="score"${state.sort === "score" ? " selected" : ""}>Highest score</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <section class="catalog-table-shell catalog-table-shell--sheet">
+            <div class="catalog-table-shell__scroll">
+              <table class="catalog-table catalog-table--sheet" aria-label="SeaDex mirror sheet">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Format</th>
+                    <th>Year</th>
+                    <th>Best</th>
+                    <th>Alt</th>
+                    <th>Notes</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="sheet-body"></tbody>
+              </table>
+            </div>
+            <div id="sheet-mobile" class="catalog-mobile"></div>
+          </section>
+        </section>
+      </main>
+      ${renderSearchDialog()}
+    `,
+  );
+
+  wireCommonUi(status, "sheet");
+
+  const searchInput = query<HTMLInputElement>("#sheet-search");
+  const formatSelect = query<HTMLSelectElement>("#sheet-format");
+  const sortSelect = query<HTMLSelectElement>("#sheet-sort");
+  const body = query<HTMLTableSectionElement>("#sheet-body");
+  const mobile = query<HTMLDivElement>("#sheet-mobile");
+
+  const renderRows = () => {
+    state.search = searchInput.value.trim();
+    state.format = formatSelect.value;
+    state.sort = sortSelect.value;
+    state.limit = 5000;
+    state.offset = 0;
+
+    const payload = filterSheetItems(sheet.items, state);
+
+    body.innerHTML = payload
+      .map(
+        (item) => `
+          <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
+            <td>
+              <div class="catalog-title">
+                <span class="catalog-title__text">${escapeHtml(item.title)}</span>
+                ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+              </div>
+            </td>
+            <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
+            <td>${item.year ?? "-"}</td>
+            <td class="sheet-groups">${escapeHtml(item.bestGroups.join(" / ") || (item.bestCount ? `${item.bestCount} release${item.bestCount === 1 ? "" : "s"}` : ""))}</td>
+            <td class="sheet-groups">${escapeHtml(item.altGroups.join(" / ") || (item.altCount ? `${item.altCount} release${item.altCount === 1 ? "" : "s"}` : ""))}</td>
+            <td class="sheet-notes">${escapeHtml(item.excerpt ?? "")}</td>
+            <td>${formatDate(item.updatedAt)}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    mobile.innerHTML = payload
+      .map(
+        (item) => `
+          <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
+            <div class="catalog-card__top">
+              <div class="catalog-card__title">
+                <strong>${escapeHtml(item.title)}</strong>
+                ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+              </div>
+            </div>
+            <div class="catalog-card__meta">
+              <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
+              <span>${item.year ?? "Unknown"}</span>
+              <span>${item.episodes ?? "?"} ep</span>
+            </div>
+            <dl class="catalog-card__groups">
+              <div>
+                <dt>Best</dt>
+                <dd>${escapeHtml(item.bestGroups.join(" / ") || (item.bestCount ? `${item.bestCount} release${item.bestCount === 1 ? "" : "s"}` : "None"))}</dd>
+              </div>
+              <div>
+                <dt>Alt</dt>
+                <dd>${escapeHtml(item.altGroups.join(" / ") || (item.altCount ? `${item.altCount} release${item.altCount === 1 ? "" : "s"}` : "None"))}</dd>
+              </div>
+            </dl>
+            ${item.excerpt ? `<p class="sheet-mobile-notes">${escapeHtml(item.excerpt)}</p>` : ""}
+            <div class="catalog-card__footer">Updated ${formatDate(item.updatedAt)}</div>
+          </article>
+        `,
+      )
+      .join("");
+
+    wireCatalogActions(body, mobile);
+  };
+
+  const debouncedRender = debounce(renderRows, 100);
+  searchInput.addEventListener("input", debouncedRender);
+  formatSelect.addEventListener("change", renderRows);
+  sortSelect.addEventListener("change", renderRows);
+  renderRows();
+}
+
+function renderAbout(status: MirrorStatus) {
+  appRoot.innerHTML = renderPageFrame(
+    status,
+    "about",
+    `
+      <main class="page page--about">
+        <section class="about-page">
+          <article class="about-essay">
+            <p class="sheet-kicker">About</p>
+            <h1>Why this mirror exists</h1>
+            <p>
+              SeaDex is too useful to be fragile. This mirror exists to keep the browsing experience fast, cheap to host, and readable on both desktop and mobile without wasting quota on a live database for every page view.
+            </p>
+            <p>
+              The project is maintained by <strong>EithonX</strong>. The idea is not to replace SeaDex or erase the original work. The idea is to preserve the experience, mirror the public data responsibly, and improve the parts that matter for day to day use.
+            </p>
+
+            <hr class="section-divider" />
+
+            <div class="about-list">
+              <div>
+                <h2>What is different here</h2>
+                <p>Static snapshots instead of constant live reads, safer rebuild logic, cleaner mobile behavior, and room for mirror-specific UX improvements once parity is stable.</p>
+              </div>
+              <div>
+                <h2>Who to credit</h2>
+                <p>SeaDex and releases.moe remain the source project. This mirror only republishes public-facing information with attribution.</p>
+              </div>
+              <div>
+                <h2>Where to find me</h2>
+                <div class="about-card__actions">
+                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">
+                    <span>${renderGithubIcon()}</span>
+                    <span>github.com/EithonX</span>
+                  </a>
+                </div>
+              </div>
+              <div>
+                <h2>Upstream pages</h2>
+                <div class="about-card__actions">
+                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_ABOUT_URL)}" target="_blank" rel="noreferrer">
+                    <span>${renderExternalIcon()}</span>
+                    <span>SeaDex about</span>
+                  </a>
+                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_SITE_URL)}" target="_blank" rel="noreferrer">
+                    <span>${renderLogInIcon()}</span>
+                    <span>releases.moe</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+      ${renderSearchDialog()}
+    `,
+  );
+
+  wireCommonUi(status, "about");
+}
+
 async function renderEntry(status: MirrorStatus, alId: number) {
   appRoot.innerHTML = renderPageFrame(
     status,
@@ -322,7 +555,20 @@ async function renderEntry(status: MirrorStatus, alId: number) {
 
   const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
   const entry = payload.entry;
+  const catalog = await getCatalog();
+  const availableIds = new Set(catalog.items.map((item) => item.alId));
+  const filteredRelations = entry.relations.filter((relation) => {
+    const relationType = relation.relationType?.toUpperCase();
+    const node = relation.node as (EntryPayload["entry"]["relations"][number]["node"] & { type?: string | null }) | undefined;
+    return (
+      (relationType === "PREQUEL" || relationType === "SEQUEL") &&
+      node?.id !== undefined &&
+      availableIds.has(node.id) &&
+      (node.type === undefined || node.type === null || node.type === "ANIME")
+    );
+  });
   const bestLabel = entry.theoreticalBest ? `<p class="entry-notes__extra"><strong>Theoretical best:</strong> ${escapeHtml(entry.theoreticalBest)}</p>` : "";
+  setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
 
   appRoot.innerHTML = renderPageFrame(
     status,
@@ -394,7 +640,7 @@ async function renderEntry(status: MirrorStatus, alId: number) {
               ${bestLabel}
             </section>
 
-            ${renderRelationsSection(entry.relations)}
+            ${renderRelationsSection(filteredRelations)}
 
             <hr class="section-divider" />
 
@@ -415,26 +661,27 @@ async function renderEntry(status: MirrorStatus, alId: number) {
   wireCommonUi(status, "entry");
 }
 
-function renderPageFrame(status: MirrorStatus, context: "index" | "entry", content: string) {
+function renderPageFrame(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet", content: string) {
   return `
     ${renderShell(status, context)}
     ${content}
   `;
 }
 
-function renderShell(status: MirrorStatus, context: "index" | "entry") {
+function renderShell(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
+  const originalSiteUrl = normalizeExternalUrl(status.mirror.originalSite || UPSTREAM_SITE_URL);
   return `
     <header class="site-header">
       <div class="site-header__inner">
         <div class="site-header__brand">
           <a href="/" class="brand-link" aria-label="SeaDex mirror home">
-            <span class="brand-mark">${renderBrandMark()}</span>
+            <span class="brand-mark"><img src="/favicon.png" alt="SeaDex logo" /></span>
             <span class="brand-label">SeaDex</span>
           </a>
           <nav class="site-nav" aria-label="Primary navigation">
-            <a href="https://releases.moe/about/" target="_blank" rel="noreferrer">About</a>
-            <a href="https://discord.com/invite/jPeeZewWRn" target="_blank" rel="noreferrer">Discord</a>
-            <a href="https://sheet.releases.moe" target="_blank" rel="noreferrer">Sheet</a>
+            <a href="/about"${context === "about" ? ` aria-current="page"` : ""}>About</a>
+            <a href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="/sheet"${context === "sheet" ? ` aria-current="page"` : ""}>Sheet</a>
           </nav>
         </div>
 
@@ -444,7 +691,7 @@ function renderShell(status: MirrorStatus, context: "index" | "entry") {
         </button>
 
         <div class="site-header__actions">
-          <a class="ghost-icon-button" href="${escapeHtml(status.mirror.originalSite)}" target="_blank" rel="noreferrer" aria-label="Open original SeaDex site">
+          <a class="ghost-icon-button" href="${escapeHtml(originalSiteUrl)}" target="_blank" rel="noreferrer" aria-label="Open original SeaDex site">
             ${renderLogInIcon()}
           </a>
           <button id="theme-toggle" class="ghost-icon-button" type="button" aria-label="Toggle theme">
@@ -621,12 +868,12 @@ function renderTorrentCard(torrent: EntryPayload["torrents"][number]) {
       <div class="torrent-card__actions">
         ${
           links.publicUrl
-            ? `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderCatIcon()} ${escapeHtml(links.publicLabel)}</a>`
+            ? `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(links.publicLabel)} ${escapeHtml(links.publicLabel)}</a>`
             : `<span class="torrent-button torrent-button--muted">No public link</span>`
         }
         ${
           links.hasPrivate
-            ? `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderLockIcon()} Private Tracker</span>`
+            ? `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`
             : ""
         }
       </div>
@@ -696,7 +943,7 @@ function renderFatal(message: string) {
   `;
 }
 
-function wireCommonUi(status: MirrorStatus, context: "index" | "entry") {
+function wireCommonUi(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
   wireThemeToggle();
   wireSearchDialog(status, context);
 }
@@ -711,7 +958,7 @@ function wireThemeToggle() {
   });
 }
 
-function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry") {
+function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
   const dialog = document.querySelector<HTMLDivElement>("#search-dialog");
   const trigger = document.querySelector<HTMLButtonElement>("#global-search-trigger");
   const input = document.querySelector<HTMLInputElement>("#dialog-search-input");
@@ -807,9 +1054,11 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry") {
     document.body.classList.add("is-modal-open");
     isOpen = true;
 
-    if (context === "index") {
-      const catalogSearch = document.querySelector<HTMLInputElement>("#catalog-search");
-      input.value = catalogSearch?.value ?? "";
+    if (context === "index" || context === "sheet") {
+      const sourceSearch =
+        document.querySelector<HTMLInputElement>("#catalog-search") ??
+        document.querySelector<HTMLInputElement>("#sheet-search");
+      input.value = sourceSearch?.value ?? "";
     }
 
     await updateResults();
@@ -914,7 +1163,9 @@ function wireCatalogActions(body: HTMLElement, mobileList: HTMLElement) {
   );
 
   attachRowHandlers(body);
-  attachRowHandlers(mobileList);
+  if (mobileList !== body) {
+    attachRowHandlers(mobileList);
+  }
 }
 
 function readCatalogStateFromUrl(): CatalogState {
@@ -964,6 +1215,36 @@ function filterSeason(items: CatalogIndexItem[], seasonFilter: string) {
   }
 
   return items.filter((item) => toSeasonKey(item.season, item.seasonYear ?? item.startYear) === seasonFilter);
+}
+
+function filterSheetItems(
+  items: SheetPayload["items"],
+  state: Pick<CatalogState, "search" | "format" | "sort">,
+) {
+  const search = state.search.trim().toLowerCase();
+  const format = state.format.trim().toUpperCase();
+
+  let filtered = items;
+  if (search) {
+    filtered = filtered.filter((item) => item.searchText.includes(search));
+  }
+
+  if (format) {
+    filtered = filtered.filter((item) => (item.format ?? "").toUpperCase() === format);
+  }
+
+  return [...filtered].sort((left, right) => {
+    switch (state.sort) {
+      case "title":
+        return left.title.localeCompare(right.title) || left.alId - right.alId;
+      case "year":
+        return (right.year ?? 0) - (left.year ?? 0) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      case "score":
+        return (right.averageScore ?? 0) - (left.averageScore ?? 0) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      default:
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.title.localeCompare(right.title);
+    }
+  });
 }
 
 function buildSeasonOptions(items: CatalogIndexItem[]) {
@@ -1087,6 +1368,41 @@ async function getCatalog() {
     cachedCatalogPromise = fetchJson<CatalogIndexPayload>(`${DATA_ROOT}/catalog.json`);
   }
   return cachedCatalogPromise;
+}
+
+async function loadSheetPayload(): Promise<SheetPayload> {
+  try {
+    return await fetchJson<SheetPayload>(`${DATA_ROOT}/sheet.json`);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("Mirror data is missing")) {
+      throw error;
+    }
+
+    const catalog = await getCatalog();
+    return {
+      generatedAt: catalog.generatedAt,
+      items: catalog.items.map((item) => ({
+        alId: item.alId,
+        recordId: item.recordId,
+        title: item.titles.display,
+        format: item.format,
+        status: item.status,
+        year: item.startYear ?? item.seasonYear,
+        episodes: item.episodes,
+        averageScore: item.averageScore,
+        incomplete: item.incomplete,
+        comparisonCount: item.comparisonLinks.length,
+        torrentCount: item.torrentCount,
+        bestCount: item.bestTorrentCount,
+        altCount: Math.max(0, item.torrentCount - item.bestTorrentCount),
+        bestGroups: [],
+        altGroups: [],
+        excerpt: item.excerpt,
+        updatedAt: item.sourceUpdatedAt,
+        searchText: item.searchText,
+      })),
+    };
+  }
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -1248,6 +1564,22 @@ function isTypingTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 }
 
+function setDocumentMeta(title: string) {
+  document.title = title;
+}
+
+function normalizeExternalUrl(value: string) {
+  if (!value) {
+    return UPSTREAM_SITE_URL;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  return `https://${value.replace(/^\/+/, "")}`;
+}
+
 function escapeHtml(value: string) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -1257,12 +1589,16 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-function renderBrandMark() {
-  return `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="url(#brand-fill)"/><path d="M22.5 10.5C20.8 8.8 17.8 8 14.9 8C10.8 8 7.7 10.1 7.7 13.5C7.7 17.1 11 18 14.7 18.7C17.5 19.2 19.2 19.8 19.2 21.3C19.2 22.9 17.4 24 14.8 24C12.3 24 10 23.1 8.1 21.3L6 23.7C8.2 26 11.4 27 14.8 27C19.7 27 22.8 24.7 22.8 21.1C22.8 17.5 20.1 16.4 16 15.7C13.1 15.2 11.2 14.8 11.2 13.2C11.2 11.7 12.8 10.7 15.1 10.7C17.2 10.7 19.3 11.3 20.8 12.7L22.5 10.5Z" fill="white"/><defs><linearGradient id="brand-fill" x1="4" y1="3.5" x2="27" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#C61919"/><stop offset="1" stop-color="#7A0707"/></linearGradient></defs></svg>`;
-}
-
 function renderSearchIcon() {
   return `<svg width="24" height="24" viewBox="0 0 15 15" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M10 6.5C10 8.433 8.433 10 6.5 10C4.567 10 3 8.433 3 6.5C3 4.567 4.567 3 6.5 3C8.433 3 10 4.567 10 6.5ZM9.30884 10.0159C8.53901 10.6318 7.56251 11 6.5 11C4.01472 11 2 8.98528 2 6.5C2 4.01472 4.01472 2 6.5 2C8.98528 2 11 4.01472 11 6.5C11 7.56251 10.6318 8.53901 10.0159 9.30884L12.8536 12.1464C13.0488 12.3417 13.0488 12.6583 12.8536 12.8536C12.6583 13.0488 12.3417 13.0488 12.1464 12.8536L9.30884 10.0159Z"></path></svg>`;
+}
+
+function renderPlusCircledIcon() {
+  return `<svg width="24" height="24" viewBox="0 0 15 15" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.49991 0.876892C3.84222 0.876892 0.877075 3.84204 0.877075 7.49972C0.877075 11.1574 3.84222 14.1226 7.49991 14.1226C11.1576 14.1226 14.1227 11.1574 14.1227 7.49972C14.1227 3.84204 11.1576 0.876892 7.49991 0.876892ZM1.82707 7.49972C1.82707 4.36671 4.36689 1.82689 7.49991 1.82689C10.6329 1.82689 13.1727 4.36671 13.1727 7.49972C13.1727 10.6327 10.6329 13.1726 7.49991 13.1726C4.36689 13.1726 1.82707 10.6327 1.82707 7.49972ZM7.50003 4C7.77617 4 8.00003 4.22386 8.00003 4.5V7H10.5C10.7762 7 11 7.22386 11 7.5C11 7.77614 10.7762 8 10.5 8H8.00003V10.5C8.00003 10.7761 7.77617 11 7.50003 11C7.22389 11 7.00003 10.7761 7.00003 10.5V8H4.50003C4.22389 8 4.00003 7.77614 4.00003 7.5C4.00003 7.22386 4.22389 7 4.50003 7H7.00003V4.5C7.00003 4.22386 7.22389 4 7.50003 4Z"></path></svg>`;
+}
+
+function renderMixerIcon() {
+  return `<svg width="24" height="24" viewBox="0 0 15 15" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M5.5 3C4.67157 3 4 3.67157 4 4.5C4 5.32843 4.67157 6 5.5 6C6.32843 6 7 5.32843 7 4.5C7 3.67157 6.32843 3 5.5 3ZM3 5C3.01671 5 3.03323 4.99918 3.04952 4.99758C3.28022 6.1399 4.28967 7 5.5 7C6.71033 7 7.71978 6.1399 7.95048 4.99758C7.96677 4.99918 7.98329 5 8 5H13.5C13.7761 5 14 4.77614 14 4.5C14 4.22386 13.7761 4 13.5 4H8C7.98329 4 7.96677 4.00082 7.95048 4.00242C7.71978 2.86009 6.71033 2 5.5 2C4.28967 2 3.28022 2.86009 3.04952 4.00242C3.03323 4.00082 3.01671 4 3 4H1.5C1.22386 4 1 4.22386 1 4.5C1 4.77614 1.22386 5 1.5 5H3ZM11.9505 10.9976C11.7198 12.1399 10.7103 13 9.5 13C8.28967 13 7.28022 12.1399 7.04952 10.9976C7.03323 10.9992 7.01671 11 7 11H1.5C1.22386 11 1 10.7761 1 10.5C1 10.2239 1.22386 10 1.5 10H7C7.01671 10 7.03323 10.0008 7.04952 10.0024C7.28022 8.8601 8.28967 8 9.5 8C10.7103 8 11.7198 8.8601 11.9505 10.0024C11.9668 10.0008 11.9833 10 12 10H13.5C13.7761 10 14 10.2239 14 10.5C14 10.7761 13.7761 11 13.5 11H12C11.9833 11 11.9668 10.9992 11.9505 10.9976ZM8 10.5C8 9.67157 8.67157 9 9.5 9C10.3284 9 11 9.67157 11 10.5C11 11.3284 10.3284 12 9.5 12C8.67157 12 8 11.3284 8 10.5Z"></path></svg>`;
 }
 
 function renderExternalIcon() {
@@ -1305,12 +1641,16 @@ function renderCloseIcon() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
 }
 
-function renderLockIcon() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`;
+function renderTrackerIcon(label: string) {
+  if (label === "Nyaa") {
+    return `<img src="/cat.png" alt="" class="tracker-icon" />`;
+  }
+
+  return renderExternalIcon();
 }
 
-function renderCatIcon() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 8.8 6H4.5A2.5 2.5 0 0 0 2 8.5v4.8A8.7 8.7 0 0 0 10.7 22h2.6A8.7 8.7 0 0 0 22 13.3V8.5A2.5 2.5 0 0 0 19.5 6h-4.3L12 2Zm-3 9.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Zm6 0a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Zm-3 5c-1.3 0-2.4-.5-3.3-1.4l1.1-1.1c.6.6 1.3.9 2.2.9s1.6-.3 2.2-.9l1.1 1.1c-.9.9-2 1.4-3.3 1.4Z"></path></svg>`;
+function renderPrivateTrackerIcon() {
+  return `<img src="/lock.ico" alt="" class="tracker-icon tracker-icon--lock" />`;
 }
 
 function renderCalendarIcon() {
@@ -1327,4 +1667,8 @@ function renderCalendarUpIcon() {
 
 function renderFormatIcon() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>`;
+}
+
+function renderGithubIcon() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.66.5 12.03c0 5.1 3.29 9.43 7.86 10.96.57.11.78-.25.78-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.2 1.77 1.2 1.04 1.78 2.72 1.27 3.38.97.1-.75.41-1.27.74-1.56-2.56-.29-5.25-1.29-5.25-5.73 0-1.27.45-2.31 1.19-3.12-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.19 1.19a10.9 10.9 0 0 1 5.81 0c2.22-1.5 3.19-1.19 3.19-1.19.63 1.59.23 2.77.11 3.06.74.81 1.19 1.85 1.19 3.12 0 4.45-2.7 5.43-5.27 5.72.42.36.79 1.05.79 2.12 0 1.54-.01 2.77-.01 3.15 0 .31.2.68.79.56A11.54 11.54 0 0 0 23.5 12.03C23.5 5.66 18.35.5 12 .5Z"/></svg>`;
 }

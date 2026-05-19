@@ -83,6 +83,7 @@ Required GitHub secrets:
 Optional repository variables:
 
 - `CLOUDFLARE_PAGES_PROJECT_NAME`
+  Default expected project name: `seadex`
 
 ## Frontend goals
 

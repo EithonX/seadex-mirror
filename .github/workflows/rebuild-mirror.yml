@@ -9,8 +9,10 @@ jobs:
   rebuild:
     runs-on: ubuntu-latest
     env:
+      ANILIST_ACCESS_TOKEN: ${{ secrets.ANILIST_ACCESS_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex-mirror' }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
+      MIRROR_STATUS_URL: ${{ format('https://{0}.pages.dev/mirror-data/status.json', vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
     steps:
       - uses: actions/checkout@v4
 

@@ -1,9 +1,10 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const DEFAULT_SOURCE_PAGE_SIZE = 100;
+const DEFAULT_SOURCE_PROBE_SIZE = 8;
 const DEFAULT_ANILIST_BATCH_SIZE = 25;
 const DEFAULT_ANILIST_DELAY_MS = 800;
 const DEFAULT_RETRY_LIMIT = 5;
@@ -58,13 +59,42 @@ async function main() {
   const sourceBaseUrl = args.source ?? process.env.SOURCE_BASE_URL ?? DEFAULT_SOURCE_BASE_URL;
   const anilistUrl = args.anilist ?? process.env.ANILIST_GRAPHQL_URL ?? DEFAULT_ANILIST_GRAPHQL_URL;
   const pageSize = parsePositiveInt(args.pageSize, DEFAULT_SOURCE_PAGE_SIZE);
+  const probeSize = parsePositiveInt(args.probeSize, DEFAULT_SOURCE_PROBE_SIZE);
   const anilistBatchSize = parsePositiveInt(args.batchSize, DEFAULT_ANILIST_BATCH_SIZE);
   const anilistDelayMs = parsePositiveInt(args.delayMs, DEFAULT_ANILIST_DELAY_MS);
   const retryLimit = parsePositiveInt(args.retryLimit, DEFAULT_RETRY_LIMIT);
+  const anilistAccessToken = args.anilistToken ?? process.env.ANILIST_ACCESS_TOKEN ?? "";
+  const statusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
+  const force = args.force === "true";
 
   const startedAt = new Date().toISOString();
+  const existingSnapshot = await loadExistingSnapshot(outputDir, statusUrl);
   const listIds = await fetchListIds(sourceBaseUrl);
+  const sourceProbe = await fetchSourceProbe(sourceBaseUrl, probeSize);
+  const probeSignature = buildProbeSignature(listIds, sourceProbe.items);
+
+  if (!force && shouldSkipRebuild(existingSnapshot, probeSignature)) {
+    console.log(
+      JSON.stringify(
+        {
+          mode: "static-snapshot",
+          skipped: true,
+          reason: "upstream-unchanged",
+          sourceBaseUrl,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          probeSignature,
+          entries: existingSnapshot?.status?.counts?.entries ?? null,
+          torrents: existingSnapshot?.status?.counts?.torrents ?? null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
   const sourceSnapshot = await fetchSourceSnapshot(sourceBaseUrl, pageSize);
 
   validateSourceSnapshot(listIds, sourceSnapshot.entries);
@@ -75,6 +105,8 @@ async function main() {
     anilistBatchSize,
     anilistDelayMs,
     retryLimit,
+    anilistAccessToken,
+    existingSnapshot?.aniListCache ?? new Map(),
   );
 
   const finishedAt = new Date().toISOString();
@@ -85,6 +117,8 @@ async function main() {
     listIds,
     entries: sourceSnapshot.entries,
     anilistMedia,
+    sourceProbe,
+    probeSignature,
   });
 
   await writeSnapshot(outputDir, snapshot);
@@ -108,6 +142,91 @@ async function main() {
   );
 }
 
+async function loadExistingSnapshot(outputDir, statusUrl) {
+  try {
+    await access(join(outputDir, "status.json"));
+    await access(join(outputDir, "entries"));
+  } catch {
+    return loadRemoteStatus(statusUrl);
+  }
+
+  try {
+    const status = JSON.parse(await readFile(join(outputDir, "status.json"), "utf8"));
+    return {
+      status,
+      aniListCache: await loadExistingAniListCache(join(outputDir, "entries")),
+    };
+  } catch {
+    return loadRemoteStatus(statusUrl);
+  }
+}
+
+async function loadRemoteStatus(statusUrl) {
+  if (!statusUrl) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(statusUrl, {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    return {
+      status: await response.json(),
+      aniListCache: new Map(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadExistingAniListCache(entriesDir) {
+  const cache = new Map();
+  const files = await readdir(entriesDir);
+
+  for (const file of files) {
+    if (!file.endsWith(".json")) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(await readFile(join(entriesDir, file), "utf8"));
+      const entry = payload?.entry;
+      if (!entry?.alId) {
+        continue;
+      }
+
+      cache.set(entry.alId, {
+        id: entry.alId,
+        title: entry.titles,
+        coverImage: entry.coverImage,
+        season: entry.season,
+        seasonYear: entry.seasonYear,
+        startDate: { year: entry.startYear },
+        format: entry.format,
+        status: entry.status,
+        episodes: entry.episodes,
+        duration: entry.duration,
+        averageScore: entry.averageScore,
+        genres: entry.genres,
+        relations: { edges: Array.isArray(entry.relations) ? entry.relations : [] },
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return cache;
+}
+
+function shouldSkipRebuild(existingSnapshot, nextProbeSignature) {
+  const previousSignature = existingSnapshot?.status?.sync?.summary?.upstreamProbe?.signature ?? null;
+  return Boolean(previousSignature && previousSignature === nextProbeSignature);
+}
+
 async function writeSnapshot(outputDir, snapshot) {
   const entriesDir = join(outputDir, "entries");
 
@@ -116,6 +235,7 @@ async function writeSnapshot(outputDir, snapshot) {
 
   await writeJson(join(outputDir, "status.json"), snapshot.status);
   await writeJson(join(outputDir, "catalog.json"), snapshot.catalog);
+  await writeJson(join(outputDir, "sheet.json"), snapshot.sheet);
 
   for (const [alId, payload] of snapshot.entries) {
     await writeJson(join(entriesDir, `${alId}.json`), payload);
@@ -128,7 +248,9 @@ async function writeJson(filePath, payload) {
 
 function buildStaticSnapshot(snapshot) {
   const items = [];
+  const sheetItems = [];
   const entryPayloads = new Map();
+  const availableAnimeIds = new Set(snapshot.listIds);
 
   let torrentCount = 0;
   let missingAniListCount = 0;
@@ -172,6 +294,29 @@ function buildStaticSnapshot(snapshot) {
     };
 
     items.push(catalogItem);
+    const bestGroups = uniqueReleaseGroups(torrents.filter((torrent) => torrent.isBest));
+    const altGroups = uniqueReleaseGroups(torrents.filter((torrent) => !torrent.isBest));
+
+    sheetItems.push({
+      alId: entry.alID,
+      recordId: entry.id,
+      title: buildTitles(entry.alID, media).display,
+      format: media?.format ?? null,
+      status: media?.status ?? null,
+      year: media?.startDate?.year ?? media?.seasonYear ?? null,
+      episodes: media?.episodes ?? null,
+      averageScore: media?.averageScore ?? null,
+      incomplete: entry.incomplete === true,
+      comparisonCount: splitLinks(entry.comparison ?? "").length,
+      torrentCount: torrents.length,
+      bestCount: bestTorrentCount,
+      altCount: Math.max(0, torrents.length - bestTorrentCount),
+      bestGroups,
+      altGroups,
+      excerpt: summarizeNotes(entry.notes ?? ""),
+      updatedAt: entry.updated,
+      searchText: buildSearchText(entry, media),
+    });
 
     entryPayloads.set(entry.alID, {
       source: {
@@ -203,7 +348,7 @@ function buildStaticSnapshot(snapshot) {
         duration: media?.duration ?? null,
         averageScore: media?.averageScore ?? null,
         genres: Array.isArray(media?.genres) ? media.genres : [],
-        relations: Array.isArray(media?.relations?.edges) ? media.relations.edges : [],
+        relations: filterRelevantRelations(media?.relations?.edges, availableAnimeIds),
       },
       torrents: torrents
         .slice()
@@ -230,7 +375,7 @@ function buildStaticSnapshot(snapshot) {
     status: {
       mirror: {
         sourceBaseUrl: snapshot.sourceBaseUrl,
-        originalSite: "releases.moe",
+        originalSite: snapshot.sourceBaseUrl,
         attribution: "SeaDex data originates from releases.moe. AniList metadata is cached by this mirror.",
         disclaimer: "This is an unofficial community mirror built to stay readable when the upstream frontend or AniList path is unstable.",
       },
@@ -261,12 +406,25 @@ function buildStaticSnapshot(snapshot) {
           entries: snapshot.entries.length,
           torrents: torrentCount,
           anilistMedia: snapshot.anilistMedia.size,
+          upstreamProbe: {
+            size: snapshot.sourceProbe.items.length,
+            signature: snapshot.probeSignature,
+          },
         },
       },
     },
     catalog: {
       generatedAt: snapshot.finishedAt,
       items,
+    },
+    sheet: {
+      generatedAt: snapshot.finishedAt,
+      items: sheetItems.sort((left, right) => {
+        return (
+          compareNumbers(Date.parse(right.updatedAt), Date.parse(left.updatedAt)) ||
+          compareStrings(left.title.toLowerCase(), right.title.toLowerCase())
+        );
+      }),
     },
     entries: entryPayloads,
   };
@@ -325,6 +483,31 @@ async function fetchListIds(sourceBaseUrl) {
         .map((value) => Number(value.trim()))
         .filter((value) => Number.isInteger(value) && value > 0),
     );
+}
+
+async function fetchSourceProbe(sourceBaseUrl, pageSize) {
+  const endpoint = new URL("/api/collections/entries/records", sourceBaseUrl);
+  endpoint.searchParams.set("page", "1");
+  endpoint.searchParams.set("perPage", String(pageSize));
+  endpoint.searchParams.set("sort", "-updated");
+  endpoint.searchParams.set("skipTotal", "1");
+
+  const response = await fetch(endpoint, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`SeaDex probe fetch failed with ${response.status} ${response.statusText}`);
+  }
+
+  const payload = await response.json();
+  return {
+    items: Array.isArray(payload.items) ? payload.items : [],
+  };
+}
+
+function buildProbeSignature(listIds, items) {
+  const probeRecords = items.map((item) => `${item.alID}:${item.updated}`).join("|");
+  return `ids=${listIds.join(",")};probe=${probeRecords}`;
 }
 
 async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
@@ -408,16 +591,39 @@ function validateSourceSnapshot(listIds, entries) {
   }
 }
 
-async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit) {
+async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit, accessToken, existingCache) {
   const mediaMap = new Map();
   const batches = chunk(ids, batchSize);
 
   for (const [index, batch] of batches.entries()) {
-    const payload = await withRetry(
-      () => fetchAniListBatch(endpoint, batch),
-      retryLimit,
-      `AniList batch ${index + 1}/${batches.length}`,
-    );
+    let payload;
+
+    try {
+      payload = await withRetry(
+        () => fetchAniListBatch(endpoint, batch, accessToken),
+        retryLimit,
+        `AniList batch ${index + 1}/${batches.length}`,
+      );
+    } catch (error) {
+      if (accessToken) {
+        console.warn(`AniList token mode failed for batch ${index + 1}/${batches.length}. Falling back to public mode.`);
+        try {
+          payload = await withRetry(
+            () => fetchAniListBatch(endpoint, batch, ""),
+            retryLimit,
+            `AniList public batch ${index + 1}/${batches.length}`,
+          );
+        } catch {
+          payload = resolveCachedAniListBatch(batch, existingCache);
+        }
+      } else {
+        payload = resolveCachedAniListBatch(batch, existingCache);
+      }
+
+      if (!payload.length) {
+        throw error;
+      }
+    }
 
     for (const media of payload) {
       mediaMap.set(media.id, media);
@@ -431,13 +637,19 @@ async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimi
   return mediaMap;
 }
 
-async function fetchAniListBatch(endpoint, ids) {
+async function fetchAniListBatch(endpoint, ids, accessToken) {
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json",
-    },
+    headers,
     body: JSON.stringify({
       query: ANILIST_MEDIA_QUERY,
       variables: {
@@ -463,6 +675,18 @@ async function fetchAniListBatch(endpoint, ids) {
   }
 
   return payload.data?.Page?.media ?? [];
+}
+
+function resolveCachedAniListBatch(ids, existingCache) {
+  const cached = ids
+    .map((id) => existingCache.get(id) ?? null)
+    .filter(Boolean);
+
+  if (cached.length) {
+    console.warn(`Using cached AniList metadata for ${cached.length}/${ids.length} entries.`);
+  }
+
+  return cached;
 }
 
 async function withRetry(work, retryLimit, label) {
@@ -512,6 +736,23 @@ function summarizeNotes(value) {
     return null;
   }
   return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
+function filterRelevantRelations(edges, availableAnimeIds) {
+  if (!Array.isArray(edges)) {
+    return [];
+  }
+
+  return edges.filter((edge) => {
+    const relationType = edge?.relationType?.toUpperCase?.();
+    const node = edge?.node;
+    return (
+      (relationType === "PREQUEL" || relationType === "SEQUEL") &&
+      node?.id &&
+      availableAnimeIds.has(node.id) &&
+      (node.type === undefined || node.type === null || node.type === "ANIME")
+    );
+  });
 }
 
 function parseArgs(rawArgs) {
