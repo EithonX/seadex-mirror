@@ -1,0 +1,19 @@
+{
+  "name": "seadex-mirror",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "cf:typegen": "wrangler types",
+    "typecheck": "tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.frontend.json --noEmit",
+    "rebuild:d1": "node scripts/rebuild-d1.mjs --apply"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "typescript": "latest",
+    "vite": "^7.2.1",
+    "wrangler": "^4.93.0"
+  }
+}

@@ -1,0 +1,10 @@
+reference/
+node_modules/
+.wrangler/
+.dev.vars
+.env
+dist/
+coverage/
+worker-configuration.d.ts
+.sync-token.tmp
+tmp/

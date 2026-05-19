@@ -1,0 +1,31 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "seadex-mirror",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-19",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 0.1
+	},
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "seadex_mirror",
+			"database_id": "eefb0e1e-0766-4ad4-b25c-7b9768df41f9"
+		}
+	],
+	"vars": {
+		"SOURCE_BASE_URL": "https://releases.moe",
+		"CACHE_TTL_SECONDS": "900"
+	}
+}
