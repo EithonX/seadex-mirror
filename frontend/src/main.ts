@@ -118,7 +118,7 @@ async function renderCatalog(status: MirrorStatus) {
             <div class="catalog-toolbar__group catalog-toolbar__group--grow">
               <label class="control-shell control-shell--search" for="catalog-search">
                 ${renderSearchIcon()}
-                <input id="catalog-search" class="control-input" type="search" placeholder="Search anime..." value="${escapeHtml(state.search)}" autocomplete="off" />
+                <input id="catalog-search" class="control-input" type="search" placeholder="Filter anime..." value="${escapeHtml(state.search)}" autocomplete="off" />
               </label>
               <label class="control-select control-select--dashed">
                 <span>Format</span>
@@ -720,7 +720,6 @@ async function renderEntry(status: MirrorStatus, alId: number) {
       (node.type === undefined || node.type === null || node.type === "ANIME")
     );
   });
-  const bestLabel = entry.theoreticalBest ? `<p class="entry-notes__extra"><strong>Theoretical best:</strong> ${escapeHtml(entry.theoreticalBest)}</p>` : "";
   setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
 
   appRoot.innerHTML = renderPageFrame(
@@ -732,13 +731,11 @@ async function renderEntry(status: MirrorStatus, alId: number) {
           <aside class="entry-sidebar">
             <section class="entry-hero">
               <div class="entry-hero__poster">
-                <a href="https://anilist.co/anime/${entry.alId}" target="_blank" rel="noreferrer">
-                  ${
-                    entry.coverImage.extraLarge
-                      ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} cover" />`
-                      : `<div class="poster-fallback">No poster art was included in the snapshot.</div>`
-                  }
-                </a>
+                ${
+                  entry.coverImage.extraLarge
+                    ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} cover" />`
+                    : `<div class="poster-fallback">No poster art was included in the snapshot.</div>`
+                }
               </div>
               <div class="entry-hero__body">
                 <h1>${escapeHtml(entry.titles.english ?? entry.titles.display)}</h1>
@@ -764,14 +761,14 @@ async function renderEntry(status: MirrorStatus, alId: number) {
 
             <section class="sidebar-section">
               <h3>Links</h3>
-              <div class="sidebar-stack">
+              <div class="sidebar-stack sidebar-stack--links">
                 <a class="comparison-link comparison-link--secondary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
-                  <span>${renderLogInIcon()}</span>
-                  <span>Open original SeaDex page</span>
+                  <img src="/favicon.png" alt="SeaDex" />
+                  <span>SeaDex</span>
                 </a>
                 <a class="comparison-link comparison-link--secondary" href="https://anilist.co/anime/${entry.alId}" target="_blank" rel="noreferrer">
-                  <span>${renderExternalIcon()}</span>
-                  <span>View on AniList</span>
+                  <img src="/anilist.svg" alt="AniList" />
+                  <span>AniList</span>
                 </a>
               </div>
             </section>
@@ -781,6 +778,21 @@ async function renderEntry(status: MirrorStatus, alId: number) {
             <section class="content-section">
               <h2>Torrents</h2>
               <div class="torrent-grid">
+                ${
+                  entry.theoreticalBest
+                    ? `
+                      <article class="torrent-card torrent-card--theoretical">
+                        <div class="torrent-card__header">
+                          <h3>${escapeHtml(entry.theoreticalBest)}</h3>
+                        </div>
+                        <div class="torrent-card__badges">
+                          <span class="pill pill--warn">Unmuxed</span>
+                          <span class="pill pill--best">Best</span>
+                        </div>
+                      </article>
+                    `
+                    : ""
+                }
                 ${payload.torrents.map(renderTorrentCard).join("")}
               </div>
             </section>
@@ -790,7 +802,6 @@ async function renderEntry(status: MirrorStatus, alId: number) {
             <section class="content-section">
               <h2>Notes</h2>
               <div class="entry-notes">${escapeHtml(entry.notes || "No notes were included for this entry.")}</div>
-              ${bestLabel}
             </section>
 
             ${renderRelationsSection(filteredRelations)}
@@ -853,11 +864,6 @@ function renderShell(status: MirrorStatus, context: "index" | "entry" | "about" 
           </button>
         </div>
       </div>
-      ${
-        context === "entry"
-          ? `<div class="site-header__context"><a class="site-header__back" href="/">${renderChevronLeftIcon()} Back to catalog</a></div>`
-          : ""
-      }
     </header>
   `;
 }
@@ -1099,6 +1105,9 @@ function renderFatal(message: string) {
 function wireCommonUi(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
   wireThemeToggle();
   wireSearchDialog(status, context);
+  if (context === "index" || context === "sheet") {
+    initializeCustomDropdowns();
+  }
 }
 
 function wireThemeToggle() {
@@ -1201,6 +1210,7 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
   };
 
   const openDialog = async () => {
+    closeAllCustomDropdowns();
     dialog.hidden = false;
     dialog.setAttribute("aria-hidden", "false");
     trigger.setAttribute("aria-expanded", "true");
@@ -1234,7 +1244,11 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
 
   globalKeydownCleanup?.();
   const onKeydown = (event: KeyboardEvent) => {
-    if (event.key === "/" && !isTypingTarget(event.target) && !isOpen) {
+    const isSearchShortcut =
+      (event.key === "/" && !isTypingTarget(event.target)) ||
+      ((event.key === "k" || event.key === "K") && (event.metaKey || event.ctrlKey));
+
+    if (isSearchShortcut && !isOpen) {
       event.preventDefault();
       void openDialog();
       return;
@@ -1908,3 +1922,266 @@ function renderFormatIcon() {
 function renderGithubIcon() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.66.5 12.03c0 5.1 3.29 9.43 7.86 10.96.57.11.78-.25.78-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.2 1.77 1.2 1.04 1.78 2.72 1.27 3.38.97.1-.75.41-1.27.74-1.56-2.56-.29-5.25-1.29-5.25-5.73 0-1.27.45-2.31 1.19-3.12-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.19 1.19a10.9 10.9 0 0 1 5.81 0c2.22-1.5 3.19-1.19 3.19-1.19.63 1.59.23 2.77.11 3.06.74.81 1.19 1.85 1.19 3.12 0 4.45-2.7 5.43-5.27 5.72.42.36.79 1.05.79 2.12 0 1.54-.01 2.77-.01 3.15 0 .31.2.68.79.56A11.54 11.54 0 0 0 23.5 12.03C23.5 5.66 18.35.5 12 .5Z"/></svg>`;
 }
+
+function initializeCustomDropdowns() {
+  const selects = document.querySelectorAll<HTMLSelectElement>(
+    ".catalog-toolbar select:not(.custom-select-initialized)"
+  );
+
+  selects.forEach((select) => {
+    select.classList.add("custom-select-initialized");
+
+    const parent = select.parentElement;
+    if (!parent) return;
+
+    const isDashed = parent.classList.contains("control-select--dashed") || parent.classList.contains("sheet-pill-select--dashed");
+    const labelSpan = parent.querySelector("span");
+    const labelText = labelSpan ? labelSpan.textContent || "" : "";
+
+    const iconSvg = parent.querySelector("svg");
+    const iconHtml = iconSvg ? iconSvg.outerHTML : "";
+
+    const wrapper = document.createElement("div");
+    wrapper.className = parent.className;
+    wrapper.classList.add("custom-select");
+    if (isDashed) {
+      wrapper.classList.add("custom-select--dashed");
+    }
+    wrapper.setAttribute("data-for", select.id);
+
+    parent.parentNode?.insertBefore(wrapper, parent);
+    wrapper.appendChild(select);
+    select.style.display = "none";
+
+    if (labelText) {
+      const label = document.createElement("span");
+      label.className = "custom-select__label";
+      label.textContent = labelText;
+      wrapper.appendChild(label);
+    }
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "custom-select__trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+
+    let triggerContentHtml = "";
+    if (iconHtml) {
+      triggerContentHtml += iconHtml;
+      wrapper.classList.add("custom-select--has-icon");
+    }
+    
+    triggerContentHtml += `<span class="custom-select__trigger-text"></span>`;
+    triggerContentHtml += `<span class="custom-select__arrow"></span>`;
+    trigger.innerHTML = triggerContentHtml;
+    wrapper.appendChild(trigger);
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "custom-select__dropdown";
+    dropdown.setAttribute("role", "listbox");
+    dropdown.setAttribute("hidden", "");
+    wrapper.appendChild(dropdown);
+
+    const syncOptions = () => {
+      dropdown.innerHTML = "";
+      
+      const scrollWrapper = document.createElement("div");
+      scrollWrapper.className = "custom-select__dropdown-scroll";
+      dropdown.appendChild(scrollWrapper);
+
+      const options = select.options;
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
+        const optionEl = document.createElement("div");
+        optionEl.className = "custom-select__option";
+        optionEl.setAttribute("data-value", opt.value);
+        optionEl.setAttribute("role", "option");
+        
+        const isSelected = opt.selected;
+        if (isSelected) {
+          optionEl.classList.add("is-selected");
+          optionEl.setAttribute("aria-selected", "true");
+        }
+
+        optionEl.innerHTML = `
+          <span>${escapeHtml(opt.text)}</span>
+          <svg class="custom-select__check" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="10 3 4.5 8.5 2 6"></polyline>
+          </svg>
+        `;
+
+        optionEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          select.value = opt.value;
+          select.dispatchEvent(new Event("change"));
+          closeDropdown();
+          trigger.focus();
+        });
+
+        scrollWrapper.appendChild(optionEl);
+      }
+
+      const selectedOpt = select.options[select.selectedIndex] || select.options[0];
+      const triggerTextEl = trigger.querySelector(".custom-select__trigger-text");
+      if (triggerTextEl) {
+        triggerTextEl.textContent = selectedOpt ? selectedOpt.text : "";
+      }
+    };
+
+    syncOptions();
+
+    const toggleDropdown = (e: Event) => {
+      e.stopPropagation();
+      const isOpen = wrapper.hasAttribute("data-open");
+      if (isOpen) {
+        closeDropdown();
+      } else {
+        openDropdown();
+      }
+    };
+
+    const openDropdown = () => {
+      closeAllCustomDropdowns(wrapper);
+
+      wrapper.setAttribute("data-open", "");
+      dropdown.removeAttribute("hidden");
+      trigger.setAttribute("aria-expanded", "true");
+
+      const selectedEl = dropdown.querySelector(".custom-select__option.is-selected");
+      if (selectedEl) {
+        selectedEl.scrollIntoView({ block: "nearest" });
+      }
+
+      dropdown.querySelectorAll(".custom-select__option").forEach(o => o.classList.remove("is-focused"));
+      selectedEl?.classList.add("is-focused");
+    };
+
+    const closeDropdown = () => {
+      wrapper.removeAttribute("data-open");
+      dropdown.setAttribute("hidden", "");
+      trigger.setAttribute("aria-expanded", "false");
+    };
+
+    trigger.addEventListener("click", toggleDropdown);
+
+    select.addEventListener("change", () => {
+      syncOptions();
+    });
+
+    trigger.addEventListener("keydown", (e: KeyboardEvent) => {
+      const isOpen = wrapper.hasAttribute("data-open");
+      const optionsArray = Array.from(dropdown.querySelectorAll<HTMLDivElement>(".custom-select__option"));
+      let focusedIndex = optionsArray.findIndex(o => o.classList.contains("is-focused"));
+
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!isOpen) {
+          openDropdown();
+          return;
+        }
+
+        if (e.key === "ArrowDown") {
+          focusedIndex = (focusedIndex + 1) % optionsArray.length;
+        } else {
+          focusedIndex = (focusedIndex - 1 + optionsArray.length) % optionsArray.length;
+        }
+
+        optionsArray.forEach(o => o.classList.remove("is-focused"));
+        const newFocused = optionsArray[focusedIndex];
+        newFocused?.classList.add("is-focused");
+        newFocused?.scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Home" || e.key === "End") {
+        if (isOpen) {
+          e.preventDefault();
+          focusedIndex = e.key === "Home" ? 0 : optionsArray.length - 1;
+          optionsArray.forEach(o => o.classList.remove("is-focused"));
+          const newFocused = optionsArray[focusedIndex];
+          newFocused?.classList.add("is-focused");
+          newFocused?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (e.key === "PageUp" || e.key === "PageDown") {
+        if (isOpen) {
+          e.preventDefault();
+          const step = 10;
+          if (e.key === "PageDown") {
+            focusedIndex = Math.min(optionsArray.length - 1, focusedIndex + step);
+          } else {
+            focusedIndex = Math.max(0, focusedIndex - step);
+          }
+          optionsArray.forEach(o => o.classList.remove("is-focused"));
+          const newFocused = optionsArray[focusedIndex];
+          newFocused?.classList.add("is-focused");
+          newFocused?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (!isOpen) {
+          openDropdown();
+        } else {
+          const newFocused = optionsArray[focusedIndex];
+          if (newFocused) {
+            const val = newFocused.getAttribute("data-value") || "";
+            select.value = val;
+            select.dispatchEvent(new Event("change"));
+            closeDropdown();
+          }
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeDropdown();
+      } else if (e.key === "Tab") {
+        closeDropdown();
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Simple typeahead: search for options starting with the typed letter
+        const char = e.key.toLowerCase();
+        if (!isOpen) {
+          openDropdown();
+        }
+
+        const startIndex = (focusedIndex + 1) % optionsArray.length;
+        let matchIndex = -1;
+        for (let i = 0; i < optionsArray.length; i++) {
+          const checkIndex = (startIndex + i) % optionsArray.length;
+          const optEl = optionsArray[checkIndex];
+          const text = optEl.querySelector("span")?.textContent?.trim().toLowerCase() || "";
+          if (text.startsWith(char)) {
+            matchIndex = checkIndex;
+            break;
+          }
+        }
+
+        if (matchIndex !== -1) {
+          e.preventDefault();
+          focusedIndex = matchIndex;
+          optionsArray.forEach(o => o.classList.remove("is-focused"));
+          const newFocused = optionsArray[focusedIndex];
+          newFocused?.classList.add("is-focused");
+          newFocused?.scrollIntoView({ block: "nearest" });
+        }
+      }
+    });
+
+    parent.remove();
+  });
+}
+
+function closeAllCustomDropdowns(exceptEl?: HTMLElement) {
+  document.querySelectorAll(".custom-select[data-open]").forEach((el) => {
+    if (el !== exceptEl) {
+      el.removeAttribute("data-open");
+      const drp = el.querySelector(".custom-select__dropdown");
+      drp?.setAttribute("hidden", "");
+      const trg = el.querySelector(".custom-select__trigger");
+      trg?.setAttribute("aria-expanded", "false");
+    }
+  });
+}
+
+// Global click event to close dropdowns when clicking outside
+document.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.closest(".custom-select")) {
+    closeAllCustomDropdowns();
+  }
+});
