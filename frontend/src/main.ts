@@ -750,13 +750,15 @@ async function renderEntry(status: MirrorStatus, alId: number) {
                     ? `<h2>${escapeHtml(entry.titles.userPreferred)}</h2>`
                     : ""
                 }
-                <div class="entry-meta-row">
-                  <span>${renderCalendarIcon()} ${entry.startYear ?? "Unknown"}</span>
-                  <span>${escapeHtml(formatSeriesLabel(entry))} ${renderFormatIcon()}</span>
-                </div>
-                <div class="entry-meta-row">
-                  <span title="Created on">${renderCalendarPlusIcon()} ${formatDate(entry.sourceCreatedAt)}</span>
-                  <span title="Updated on">${formatDate(entry.sourceUpdatedAt)} ${renderCalendarUpIcon()}</span>
+                <div class="entry-meta-wrap">
+                  <div class="entry-meta-row">
+                    <span>${renderCalendarIcon()} ${entry.startYear ?? "Unknown"}</span>
+                    <span>${escapeHtml(formatSeriesLabel(entry))} ${renderFormatIcon()}</span>
+                  </div>
+                  <div class="entry-meta-row">
+                    <span title="Created on">${renderCalendarPlusIcon()} ${formatDate(entry.sourceCreatedAt)}</span>
+                    <span title="Updated on">${formatDate(entry.sourceUpdatedAt)} ${renderCalendarUpIcon()}</span>
+                  </div>
                 </div>
               </div>
             </section>
@@ -799,7 +801,7 @@ async function renderEntry(status: MirrorStatus, alId: number) {
                     `
                     : ""
                 }
-                ${payload.torrents.map(renderTorrentCard).join("")}
+                ${renderTorrentCards(payload.torrents)}
               </div>
             </section>
 
@@ -811,16 +813,16 @@ async function renderEntry(status: MirrorStatus, alId: number) {
             </section>
 
             ${renderRelationsSection(filteredRelations)}
+          </section>
+        </div>
 
-            <hr class="section-divider" />
-
-            <section class="content-section content-section--subtle">
-              <div class="mirror-inline">
-                <span>${status.counts.entries} mirrored entries</span>
-                <span>${status.integrity.expandedTorrentParity === "match" ? "Expanded torrent parity locked" : "Parity warning"}</span>
-                <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
-              </div>
-            </section>
+        <div class="entry-footer">
+          <section class="content-section content-section--subtle">
+            <div class="mirror-inline">
+              <span>${status.counts.entries} mirrored entries</span>
+              <span>${status.integrity.expandedTorrentParity === "match" ? "Expanded torrent parity locked" : "Parity warning"}</span>
+              <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
+            </div>
           </section>
         </div>
       </main>
@@ -1013,37 +1015,88 @@ function renderComparisonsSection(links: string[]) {
   `;
 }
 
-function renderTorrentCard(torrent: EntryPayload["torrents"][number]) {
-  const totalSize = torrent.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
-  const links = classifyTorrentLinks(torrent);
+function renderTorrentCards(torrents: EntryPayload["torrents"]): string {
+  if (!torrents || torrents.length === 0) {
+    return "";
+  }
 
-  return `
-    <article class="torrent-card">
-      <div class="torrent-card__header">
-        <h3>${escapeHtml(torrent.releaseGroup || "Unknown group")}</h3>
-        <p>${totalSize > 0 ? `<span>${formatBytes(totalSize)}</span>` : ""}<span>${torrent.files.length} file${torrent.files.length === 1 ? "" : "s"}</span></p>
-      </div>
+  // Group torrents by releaseGroup and formatted size to avoid merging different releases (e.g. 1080p and 720p) from the same group
+  const groups: { [key: string]: { groupName: string; torrents: EntryPayload["torrents"] } } = {};
+  for (const t of torrents) {
+    const groupName = (t.releaseGroup || "Unknown group").trim();
+    const sizeNum = t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
+    const formattedSize = formatBytes(sizeNum);
+    
+    const groupKey = `${groupName}|${formattedSize}`;
+    if (!groups[groupKey]) {
+      groups[groupKey] = { groupName, torrents: [] };
+    }
+    groups[groupKey].torrents.push(t);
+  }
 
-      <div class="torrent-card__badges">
-        <span class="pill ${torrent.isBest ? "pill--best" : "pill--alt"}">${torrent.isBest ? "Best" : "Alt"}</span>
-        ${torrent.dualAudio ? `<span class="pill pill--tag">Dual Audio</span>` : ""}
-        ${torrent.tags.slice(0, 4).map((tag) => `<span class="pill pill--tag">${escapeHtml(tag)}</span>`).join("")}
-      </div>
+  return Object.values(groups)
+    .map(({ groupName, torrents: groupList }) => {
+      // 1. Calculate total sizes and find unique formatted sizes
+      const sizes = groupList
+        .map((t) => t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0))
+        .filter((s) => s > 0);
+      const uniqueSizes = [...new Set(sizes.map((s) => formatBytes(s)))];
+      const sizeLabel = uniqueSizes.length > 0 ? `<span>${uniqueSizes.join(" / ")}</span>` : "";
 
-      <div class="torrent-card__actions">
-        ${
-          links.publicUrl
-            ? `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(links.publicLabel)} ${escapeHtml(links.publicLabel)}</a>`
-            : `<span class="torrent-button torrent-button--muted">No public link</span>`
+      // 2. Calculate file counts and find unique file counts
+      const uniqueFileCounts = [...new Set(groupList.map((t) => t.files.length))];
+      const fileLabel = `<span>${uniqueFileCounts.map((c) => `${c} file${c === 1 ? "" : "s"}`).join(" / ")}</span>`;
+
+      // 3. Badges: Best if any isBest, Dual Audio if any is dualAudio, unique tags (up to 4)
+      const isBest = groupList.some((t) => t.isBest);
+      const dualAudio = groupList.some((t) => t.dualAudio);
+      const tags = [...new Set(groupList.flatMap((t) => t.tags))].slice(0, 4);
+
+      // 4. Combine links/actions
+      let publicUrl: string | null = null;
+      let publicLabel = "Public";
+      let hasPrivate = false;
+
+      for (const t of groupList) {
+        const links = classifyTorrentLinks(t);
+        if (links.publicUrl && !publicUrl) {
+          publicUrl = links.publicUrl;
+          publicLabel = links.publicLabel;
         }
-        ${
-          links.hasPrivate
-            ? `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`
-            : ""
+        if (links.hasPrivate) {
+          hasPrivate = true;
         }
-      </div>
-    </article>
-  `;
+      }
+
+      return `
+        <article class="torrent-card">
+          <div class="torrent-card__header">
+            <h3>${escapeHtml(groupName)}</h3>
+            <p>${sizeLabel}${fileLabel}</p>
+          </div>
+
+          <div class="torrent-card__badges">
+            <span class="pill ${isBest ? "pill--best" : "pill--alt"}">${isBest ? "Best" : "Alt"}</span>
+            ${dualAudio ? `<span class="pill pill--tag">Dual Audio</span>` : ""}
+            ${tags.map((tag) => `<span class="pill pill--tag">${escapeHtml(tag)}</span>`).join("")}
+          </div>
+
+          <div class="torrent-card__actions">
+            ${
+              publicUrl
+                ? `<a class="torrent-button" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(publicLabel)} ${escapeHtml(publicLabel)}</a>`
+                : `<span class="torrent-button torrent-button--muted">No public link</span>`
+            }
+            ${
+              hasPrivate
+                ? `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`
+                : ""
+            }
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderRelationsSection(relations: EntryPayload["entry"]["relations"]) {

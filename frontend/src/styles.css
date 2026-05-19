@@ -1168,6 +1168,15 @@ img {
   width: 100%;
 }
 
+.page--entry {
+  display: flex;
+  flex-direction: column;
+}
+
+.entry-footer {
+  margin-top: auto;
+}
+
 /* Sheet page breaks out of the container to go full-bleed */
 .page--sheet {
   width: 100%;
@@ -1189,13 +1198,12 @@ img {
 
 .entry-layout {
   display: flex;
-  align-items: flex-start;
   gap: 3rem;
 }
 
 .entry-sidebar {
-  width: min(20rem, 100%);
-  flex: 0 0 20rem;
+  width: min(17rem, 100%);
+  flex: 0 0 17rem;
 }
 
 .entry-main {
@@ -1233,6 +1241,10 @@ img {
 }
 
 .entry-hero__body {
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: 100%;
   margin-top: 1.5rem;
 }
 
@@ -1249,6 +1261,11 @@ img {
   font-weight: 500;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.entry-meta-wrap {
+  display: block;
+  width: 100%;
 }
 
 .entry-meta-row {
@@ -1285,7 +1302,7 @@ img {
 .section-divider {
   border: 0;
   border-top: 1px solid var(--line);
-  margin: 1rem 0;
+  margin: 1.25rem 0 0.25rem;
 }
 
 .sidebar-section h3 {
@@ -1299,9 +1316,14 @@ img {
 
 .sidebar-stack {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.65rem;
+  width: 100%;
+}
+
+.sidebar-stack .comparison-link {
+  width: 100%;
+  justify-content: center;
 }
 
 .sidebar-stack--links {
@@ -2163,8 +2185,15 @@ body:has(.page--sheet) #app {
   }
 
   .sidebar-stack {
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto;
     justify-content: center;
     align-items: center;
+  }
+
+  .sidebar-stack .comparison-link {
+    width: 100%;
   }
 
   .sidebar-stack--links {
@@ -2309,13 +2338,13 @@ body:has(.page--sheet) #app {
 
   .entry-hero__body {
     text-align: center;
-    margin-top: 1.25rem;
+    margin: 1.25rem auto 0;
   }
 
   .entry-meta-row {
     flex-direction: row;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: space-between;
     gap: 0.5rem 1rem;
     padding-top: 0.5rem;
   }
