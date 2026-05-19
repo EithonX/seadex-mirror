@@ -1,27 +1,17 @@
 # SeaDex mirror
 
-This repo hosts an unofficial resilience mirror for `releases.moe`.
+This repo hosts an unofficial static mirror for `releases.moe`.
 
 The current architecture is intentionally simple:
 
-- Cloudflare Worker serves the API and static frontend
-- D1 stores a clean mirrored snapshot
-- an external rebuild script fetches SeaDex public data plus AniList metadata, verifies parity, and rewrites D1 from a known-good snapshot
+- GitHub Actions or a local script fetch SeaDex public data plus AniList metadata
+- the build step writes static JSON into `frontend/public/mirror-data`
+- Vite builds a static frontend that reads those files directly
+- Cloudflare Pages serves the app as static assets
 
-## Why this changed
+## Why this works
 
-The earlier Worker-side sync path was flaky for two reasons:
-
-- AniList requests from inside the Worker were unreliable
-- partial sync logic allowed torrent rows to drift out of parity with the source
-
-The live source audit showed:
-
-- SeaDex currently exposes `2661` public entries
-- all live entries currently expand to torrents through `expand=trs`
-- broken torrent links in the mirror came from unresolved relative source URLs, not missing source data
-
-So the mirror now rebuilds from a full validated snapshot instead of trying to patch data incrementally inside a single Worker invocation.
+The public SeaDex data is mostly read-heavy and changes far less often than users browse it. That makes a static snapshot a much better fit than a live database on a free-tier quota.
 
 ## Core commands
 
@@ -43,39 +33,46 @@ Build the frontend:
 npm run build
 ```
 
-Rebuild remote D1 from live SeaDex + AniList:
+Build local mirror data from live SeaDex + AniList:
 
 ```bash
-npm run rebuild:d1
+npm run data:build
 ```
 
-Deploy Worker + static assets:
+Build data and static site together:
+
+```bash
+npm run build:site
+```
+
+Deploy to Cloudflare Pages:
 
 ```bash
 npm run deploy
 ```
 
-## D1 workflow
+## Static data workflow
 
 The intended flow is:
 
-1. create or recreate the D1 database
-2. apply [`migrations/0001_init.sql`](migrations/0001_init.sql)
-3. run [`scripts/rebuild-d1.mjs`](scripts/rebuild-d1.mjs) against the remote database
-4. deploy the Worker
+1. run [`scripts/build-static-data.mjs`](scripts/build-static-data.mjs)
+2. write `status.json`, `catalog.json`, and `entries/<anilist-id>.json` into `frontend/public/mirror-data`
+3. build the frontend with Vite
+4. deploy the static output to Cloudflare Pages
 
-The rebuild script:
+The static data builder:
 
 - fetches `listIDs`
 - fetches all public `entries` with `expand=trs`
 - verifies parity between those two source views
 - resolves relative torrent URLs against `https://releases.moe`
 - fetches AniList only for SeaDex entry IDs
-- writes a full clean snapshot into D1
+- enriches relation data for extra franchise context on entry pages
+- writes a full clean snapshot into static JSON files
 
 ## Automation
 
-Cloudflare free-tier Workers are fine for serving the mirror, but they are not a reliable place to do the full AniList enrichment pass.
+Cloudflare Pages is the recommended deployment target because static asset requests are free and do not burn Workers request quota. The full enrichment pass should still happen outside Cloudflare at build time.
 
 The recommended automation path is the GitHub Actions workflow in `.github/workflows/rebuild-mirror.yml`.
 
@@ -85,18 +82,14 @@ Required GitHub secrets:
 
 Optional repository variables:
 
-- `CLOUDFLARE_D1_DATABASE_NAME`
+- `CLOUDFLARE_PAGES_PROJECT_NAME`
 
-## Frontend
+## Frontend goals
 
-The old placeholder frontend has been replaced with a TypeScript app built by Vite.
-
-Goals of the new UI:
-
-- make mirror freshness and integrity visible
+- stay close to SeaDex's editorial browsing feel
 - keep torrent choices readable on desktop and mobile
-- clearly distinguish original SeaDex links from mirrored cached data
-- feel intentional instead of generic
+- surface mirror freshness without turning the site into a dashboard
+- leave room for extra metadata such as franchise context
 
 ## Notes
 

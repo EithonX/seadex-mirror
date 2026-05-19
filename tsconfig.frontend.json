@@ -8,5 +8,5 @@
     "noEmit": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
-  "include": ["frontend/src/**/*.ts"]
+  "include": ["frontend/src/**/*.ts", "shared/**/*.ts"]
 }

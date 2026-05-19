@@ -4,11 +4,12 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
-    "cf:typegen": "wrangler types",
-    "typecheck": "tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.frontend.json --noEmit",
-    "rebuild:d1": "node scripts/rebuild-d1.mjs --apply"
+    "build:site": "npm run data:build && npm run build",
+    "data:build": "node scripts/build-static-data.mjs",
+    "dev": "vite",
+    "dev:pages": "wrangler pages dev dist",
+    "deploy": "npm run build:site && wrangler pages deploy dist",
+    "typecheck": "tsc -p tsconfig.frontend.json --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",

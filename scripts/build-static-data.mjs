@@ -1,15 +1,13 @@
-import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { resolve, join } from "node:path";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
-const DEFAULT_D1_DATABASE_NAME = "seadex_mirror";
 const DEFAULT_SOURCE_PAGE_SIZE = 100;
 const DEFAULT_ANILIST_BATCH_SIZE = 25;
 const DEFAULT_ANILIST_DELAY_MS = 800;
-const DEFAULT_OUTPUT_PATH = "tmp/rebuild-d1.sql";
 const DEFAULT_RETRY_LIMIT = 5;
+const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
 
 const ANILIST_MEDIA_QUERY = `
   query($ids:[Int],$page:Int,$perPage:Int){
@@ -36,6 +34,7 @@ const ANILIST_MEDIA_QUERY = `
         genres
         relations{
           edges{
+            relationType
             node{
               id
               title{userPreferred english}
@@ -58,13 +57,11 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const sourceBaseUrl = args.source ?? process.env.SOURCE_BASE_URL ?? DEFAULT_SOURCE_BASE_URL;
   const anilistUrl = args.anilist ?? process.env.ANILIST_GRAPHQL_URL ?? DEFAULT_ANILIST_GRAPHQL_URL;
-  const databaseName = args.db ?? process.env.D1_DATABASE_NAME ?? DEFAULT_D1_DATABASE_NAME;
   const pageSize = parsePositiveInt(args.pageSize, DEFAULT_SOURCE_PAGE_SIZE);
   const anilistBatchSize = parsePositiveInt(args.batchSize, DEFAULT_ANILIST_BATCH_SIZE);
   const anilistDelayMs = parsePositiveInt(args.delayMs, DEFAULT_ANILIST_DELAY_MS);
   const retryLimit = parsePositiveInt(args.retryLimit, DEFAULT_RETRY_LIMIT);
-  const outputPath = resolve(args.out ?? DEFAULT_OUTPUT_PATH);
-  const apply = args.apply === "true";
+  const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
 
   const startedAt = new Date().toISOString();
   const listIds = await fetchListIds(sourceBaseUrl);
@@ -81,7 +78,7 @@ async function main() {
   );
 
   const finishedAt = new Date().toISOString();
-  const sql = buildSqlSnapshot({
+  const snapshot = buildStaticSnapshot({
     sourceBaseUrl,
     startedAt,
     finishedAt,
@@ -90,29 +87,226 @@ async function main() {
     anilistMedia,
   });
 
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, sql, "utf8");
+  await writeSnapshot(outputDir, snapshot);
 
   console.log(
     JSON.stringify(
       {
+        mode: "static-snapshot",
         sourceBaseUrl,
         startedAt,
         finishedAt,
-        listIds: listIds.length,
-        entries: sourceSnapshot.entries.length,
-        torrents: sourceSnapshot.torrentCount,
-        anilistMedia: anilistMedia.size,
-        outputPath,
+        outputDir,
+        entries: snapshot.catalog.items.length,
+        entryFiles: snapshot.catalog.items.length,
+        torrents: snapshot.status.counts.torrents,
+        anilistMedia: snapshot.status.counts.anilistMedia,
       },
       null,
       2,
     ),
   );
+}
 
-  if (apply) {
-    runWranglerImport(databaseName, outputPath);
+async function writeSnapshot(outputDir, snapshot) {
+  const entriesDir = join(outputDir, "entries");
+
+  await rm(outputDir, { recursive: true, force: true });
+  await mkdir(entriesDir, { recursive: true });
+
+  await writeJson(join(outputDir, "status.json"), snapshot.status);
+  await writeJson(join(outputDir, "catalog.json"), snapshot.catalog);
+
+  for (const [alId, payload] of snapshot.entries) {
+    await writeJson(join(entriesDir, `${alId}.json`), payload);
   }
+}
+
+async function writeJson(filePath, payload) {
+  await writeFile(filePath, `${JSON.stringify(payload)}\n`, "utf8");
+}
+
+function buildStaticSnapshot(snapshot) {
+  const items = [];
+  const entryPayloads = new Map();
+
+  let torrentCount = 0;
+  let missingAniListCount = 0;
+  let zeroTorrentCount = 0;
+
+  for (const entry of snapshot.entries) {
+    const media = snapshot.anilistMedia.get(entry.alID) ?? null;
+    const torrents = entry.expand?.trs ?? [];
+    const bestTorrentCount = torrents.filter((torrent) => torrent.isBest === true).length;
+
+    torrentCount += torrents.length;
+    if (torrents.length === 0) {
+      zeroTorrentCount += 1;
+    }
+    if (!media) {
+      missingAniListCount += 1;
+    }
+
+    const catalogItem = {
+      alId: entry.alID,
+      recordId: entry.id,
+      comparisonLinks: splitLinks(entry.comparison ?? ""),
+      excerpt: summarizeNotes(entry.notes ?? ""),
+      incomplete: entry.incomplete === true,
+      sourceUpdatedAt: entry.updated,
+      titles: buildTitles(entry.alID, media),
+      coverImage: {
+        extraLarge: media?.coverImage?.extraLarge ?? null,
+        color: media?.coverImage?.color ?? null,
+      },
+      season: media?.season ?? null,
+      seasonYear: media?.seasonYear ?? null,
+      startYear: media?.startDate?.year ?? null,
+      format: media?.format ?? null,
+      status: media?.status ?? null,
+      episodes: media?.episodes ?? null,
+      averageScore: media?.averageScore ?? null,
+      torrentCount: torrents.length,
+      bestTorrentCount,
+      searchText: buildSearchText(entry, media),
+    };
+
+    items.push(catalogItem);
+
+    entryPayloads.set(entry.alID, {
+      source: {
+        originalSite: snapshot.sourceBaseUrl,
+        originalEntryUrl: `${snapshot.sourceBaseUrl}/${entry.alID}/`,
+      },
+      entry: {
+        alId: entry.alID,
+        recordId: entry.id,
+        comparisonLinks: splitLinks(entry.comparison ?? ""),
+        notes: entry.notes ?? "",
+        theoreticalBest: entry.theoreticalBest ?? null,
+        incomplete: entry.incomplete === true,
+        sourceCreatedAt: entry.created,
+        sourceUpdatedAt: entry.updated,
+        torrentCount: torrents.length,
+        bestTorrentCount,
+        titles: buildTitles(entry.alID, media),
+        coverImage: {
+          extraLarge: media?.coverImage?.extraLarge ?? null,
+          color: media?.coverImage?.color ?? null,
+        },
+        season: media?.season ?? null,
+        seasonYear: media?.seasonYear ?? null,
+        startYear: media?.startDate?.year ?? null,
+        format: media?.format ?? null,
+        status: media?.status ?? null,
+        episodes: media?.episodes ?? null,
+        duration: media?.duration ?? null,
+        averageScore: media?.averageScore ?? null,
+        genres: Array.isArray(media?.genres) ? media.genres : [],
+        relations: Array.isArray(media?.relations?.edges) ? media.relations.edges : [],
+      },
+      torrents: torrents
+        .slice()
+        .sort((left, right) => compareTorrentRows(left, right))
+        .map((torrent) => ({
+          id: torrent.id,
+          releaseGroup: torrent.releaseGroup ?? "",
+          tracker: torrent.tracker ?? "",
+          sourceUrl: torrent.url ?? null,
+          url: resolveSourceUrl(snapshot.sourceBaseUrl, torrent.url ?? "") || null,
+          sourceGroupedUrl: torrent.groupedUrl ?? null,
+          groupedUrl: resolveSourceUrl(snapshot.sourceBaseUrl, torrent.groupedUrl ?? "") || null,
+          infoHash: torrent.infoHash ?? null,
+          dualAudio: torrent.dualAudio === true,
+          isBest: torrent.isBest === true,
+          tags: Array.isArray(torrent.tags) ? torrent.tags : [],
+          files: Array.isArray(torrent.files) ? torrent.files : [],
+          sourceUpdatedAt: torrent.updated,
+        })),
+    });
+  }
+
+  return {
+    status: {
+      mirror: {
+        sourceBaseUrl: snapshot.sourceBaseUrl,
+        originalSite: "releases.moe",
+        attribution: "SeaDex data originates from releases.moe. AniList metadata is cached by this mirror.",
+        disclaimer: "This is an unofficial community mirror built to stay readable when the upstream frontend or AniList path is unstable.",
+      },
+      counts: {
+        entries: snapshot.entries.length,
+        torrents: torrentCount,
+        anilistMedia: snapshot.anilistMedia.size,
+      },
+      integrity: {
+        entriesWithoutTorrents: zeroTorrentCount,
+        entriesWithoutAniList: missingAniListCount,
+        sourceListIdCount: snapshot.listIds.length,
+        sourceEntryCount: snapshot.entries.length,
+        sourceTorrentCount: torrentCount,
+        listIdParity: "match",
+        expandedTorrentParity: "match",
+      },
+      sync: {
+        lastRebuildStartedAt: snapshot.startedAt,
+        lastRebuildFinishedAt: snapshot.finishedAt,
+        lastRebuildMode: "static-snapshot",
+        lastError: null,
+        summary: {
+          mode: "static-snapshot",
+          sourceBaseUrl: snapshot.sourceBaseUrl,
+          startedAt: snapshot.startedAt,
+          finishedAt: snapshot.finishedAt,
+          entries: snapshot.entries.length,
+          torrents: torrentCount,
+          anilistMedia: snapshot.anilistMedia.size,
+        },
+      },
+    },
+    catalog: {
+      generatedAt: snapshot.finishedAt,
+      items,
+    },
+    entries: entryPayloads,
+  };
+}
+
+function buildTitles(alId, media) {
+  return {
+    userPreferred: media?.title?.userPreferred ?? null,
+    english: media?.title?.english ?? null,
+    display: media?.title?.english ?? media?.title?.userPreferred ?? String(alId),
+  };
+}
+
+function buildSearchText(entry, media) {
+  return [
+    media?.title?.english ?? "",
+    media?.title?.userPreferred ?? "",
+    entry.notes ?? "",
+    entry.alID,
+  ]
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compareTorrentRows(left, right) {
+  return (
+    compareNumbers(right.isBest === true ? 1 : 0, left.isBest === true ? 1 : 0) ||
+    compareStrings((left.releaseGroup ?? "").toLowerCase(), (right.releaseGroup ?? "").toLowerCase()) ||
+    compareStrings(left.id ?? "", right.id ?? "")
+  );
+}
+
+function compareNumbers(left, right) {
+  return left - right;
+}
+
+function compareStrings(left, right) {
+  return left.localeCompare(right);
 }
 
 async function fetchListIds(sourceBaseUrl) {
@@ -164,19 +358,16 @@ async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
 
   const deduped = [];
   const seen = new Set();
-  let torrentCount = 0;
   for (const entry of entries) {
     if (seen.has(entry.alID)) {
       continue;
     }
     seen.add(entry.alID);
     deduped.push(entry);
-    torrentCount += entry.expand?.trs?.length ?? 0;
   }
 
   return {
     entries: deduped,
-    torrentCount,
   };
 }
 
@@ -231,10 +422,6 @@ async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimi
     for (const media of payload) {
       mediaMap.set(media.id, media);
     }
-
-    console.log(
-      `Fetched AniList batch ${index + 1}/${batches.length} for ids ${batch[0]}-${batch[batch.length - 1]}.`,
-    );
 
     if (index < batches.length - 1 && delayMs > 0) {
       await sleep(delayMs);
@@ -300,165 +487,6 @@ async function withRetry(work, retryLimit, label) {
   throw new Error(`${label} exhausted retries.`);
 }
 
-function buildSqlSnapshot(snapshot) {
-  const mirroredAt = snapshot.finishedAt;
-  const summary = {
-    mode: "external-full-rebuild",
-    sourceBaseUrl: snapshot.sourceBaseUrl,
-    startedAt: snapshot.startedAt,
-    finishedAt: snapshot.finishedAt,
-    entries: snapshot.entries.length,
-    torrents: snapshot.entries.reduce((sum, entry) => sum + (entry.expand?.trs?.length ?? 0), 0),
-    anilistMedia: snapshot.anilistMedia.size,
-  };
-
-  const lines = [
-    "DELETE FROM torrents;",
-    "DELETE FROM entries;",
-    "DELETE FROM anilist_media;",
-    "DELETE FROM sync_state;",
-  ];
-
-  for (const entry of snapshot.entries) {
-    const torrents = entry.expand?.trs ?? [];
-    const bestTorrentCount = torrents.filter((torrent) => torrent.isBest === true).length;
-
-    lines.push(
-      `INSERT INTO entries (
-        al_id,
-        record_id,
-        comparison,
-        notes,
-        theoretical_best,
-        incomplete,
-        source_created_at,
-        source_updated_at,
-        mirrored_at,
-        torrent_count,
-        best_torrent_count
-      ) VALUES (
-        ${sqlNumber(entry.alID)},
-        ${sqlString(entry.id)},
-        ${sqlString(entry.comparison ?? "")},
-        ${sqlString(entry.notes ?? "")},
-        ${sqlString(entry.theoreticalBest ?? "")},
-        ${sqlBoolean(entry.incomplete)},
-        ${sqlString(entry.created)},
-        ${sqlString(entry.updated)},
-        ${sqlString(mirroredAt)},
-        ${sqlNumber(torrents.length)},
-        ${sqlNumber(bestTorrentCount)}
-      );`,
-    );
-
-    for (const torrent of torrents) {
-      lines.push(
-        `INSERT INTO torrents (
-          mirror_key,
-          source_torrent_id,
-          entry_al_id,
-          release_group,
-          tracker,
-          source_url,
-          resolved_url,
-          source_grouped_url,
-          resolved_grouped_url,
-          info_hash,
-          dual_audio,
-          is_best,
-          tags_json,
-        files_json,
-        source_created_at,
-        source_updated_at,
-        mirrored_at
-      ) VALUES (
-          ${sqlString(`${entry.alID}:${torrent.id}`)},
-          ${sqlString(torrent.id)},
-          ${sqlNumber(entry.alID)},
-          ${sqlString(torrent.releaseGroup ?? "")},
-          ${sqlString(torrent.tracker ?? "")},
-          ${sqlString(torrent.url ?? "")},
-          ${sqlString(resolveSourceUrl(snapshot.sourceBaseUrl, torrent.url ?? ""))},
-          ${sqlString(torrent.groupedUrl ?? "")},
-          ${sqlString(resolveSourceUrl(snapshot.sourceBaseUrl, torrent.groupedUrl ?? ""))},
-          ${sqlString(torrent.infoHash ?? "")},
-          ${sqlBoolean(torrent.dualAudio)},
-          ${sqlBoolean(torrent.isBest)},
-          ${sqlString(JSON.stringify(torrent.tags ?? []))},
-          ${sqlString(JSON.stringify(torrent.files ?? []))},
-          ${sqlString(torrent.created)},
-          ${sqlString(torrent.updated)},
-          ${sqlString(mirroredAt)}
-        );`,
-      );
-    }
-  }
-
-  for (const media of snapshot.anilistMedia.values()) {
-    lines.push(
-      `INSERT INTO anilist_media (
-        id,
-        title_user_preferred,
-        title_english,
-        cover_image_extra_large,
-        cover_image_color,
-        season,
-        season_year,
-        start_year,
-        format,
-        status,
-        episodes,
-        duration,
-        average_score,
-        genres_json,
-        relations_json,
-        fetched_at
-      ) VALUES (
-        ${sqlNumber(media.id)},
-        ${sqlString(media.title?.userPreferred ?? "")},
-        ${sqlString(media.title?.english ?? "")},
-        ${sqlString(media.coverImage?.extraLarge ?? "")},
-        ${sqlString(media.coverImage?.color ?? "")},
-        ${sqlString(media.season ?? "")},
-        ${sqlNullableNumber(media.seasonYear)},
-        ${sqlNullableNumber(media.startDate?.year)},
-        ${sqlString(media.format ?? "")},
-        ${sqlString(media.status ?? "")},
-        ${sqlNullableNumber(media.episodes)},
-        ${sqlNullableNumber(media.duration)},
-        ${sqlNullableNumber(media.averageScore)},
-        ${sqlString(JSON.stringify(media.genres ?? []))},
-        ${sqlString(JSON.stringify(media.relations?.edges ?? []))},
-        ${sqlString(mirroredAt)}
-      );`,
-    );
-  }
-
-  lines.push(
-    syncStateInsert("source_list_id_count", String(snapshot.listIds.length), mirroredAt),
-    syncStateInsert("source_entry_count", String(snapshot.entries.length), mirroredAt),
-    syncStateInsert(
-      "source_torrent_count",
-      String(snapshot.entries.reduce((sum, entry) => sum + (entry.expand?.trs?.length ?? 0), 0)),
-      mirroredAt,
-    ),
-    syncStateInsert("anilist_media_count", String(snapshot.anilistMedia.size), mirroredAt),
-    syncStateInsert("source_list_id_parity", "match", mirroredAt),
-    syncStateInsert("expanded_torrent_parity", "match", mirroredAt),
-    syncStateInsert("last_rebuild_mode", "external-full-rebuild", mirroredAt),
-    syncStateInsert("last_rebuild_started_at", snapshot.startedAt, mirroredAt),
-    syncStateInsert("last_rebuild_finished_at", snapshot.finishedAt, mirroredAt),
-    syncStateInsert("last_error", "", mirroredAt),
-    syncStateInsert("last_rebuild_summary", JSON.stringify(summary), mirroredAt),
-  );
-
-  return `${lines.join("\n")}\n`;
-}
-
-function syncStateInsert(key, value, updatedAt) {
-  return `INSERT INTO sync_state (key, value, updated_at) VALUES (${sqlString(key)}, ${sqlString(value)}, ${sqlString(updatedAt)});`;
-}
-
 function resolveSourceUrl(sourceBaseUrl, value) {
   if (!value) {
     return "";
@@ -471,22 +499,19 @@ function resolveSourceUrl(sourceBaseUrl, value) {
   }
 }
 
-function runWranglerImport(databaseName, filePath) {
-  const wranglerExecutable =
-    process.platform === "win32"
-      ? resolve("node_modules", ".bin", "wrangler.cmd")
-      : resolve("node_modules", ".bin", "wrangler");
+function splitLinks(value) {
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
-  if (process.platform === "win32") {
-    execFileSync("cmd.exe", ["/c", wranglerExecutable, "d1", "execute", databaseName, "--remote", "--file", filePath], {
-      stdio: "inherit",
-    });
-    return;
+function summarizeNotes(value) {
+  const normalized = String(value).replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
   }
-
-  execFileSync(wranglerExecutable, ["d1", "execute", databaseName, "--remote", "--file", filePath], {
-    stdio: "inherit",
-  });
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
 }
 
 function parseArgs(rawArgs) {
@@ -526,22 +551,6 @@ function chunk(items, size) {
     batches.push(items.slice(index, index + size));
   }
   return batches;
-}
-
-function sqlString(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-function sqlNumber(value) {
-  return Number.isFinite(value) ? String(value) : "0";
-}
-
-function sqlNullableNumber(value) {
-  return Number.isFinite(value) ? String(value) : "NULL";
-}
-
-function sqlBoolean(value) {
-  return value ? "1" : "0";
 }
 
 function sleep(ms) {

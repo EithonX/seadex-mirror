@@ -1,122 +1,13 @@
 import "./styles.css";
+import {
+  filterCatalogItems,
+  type CatalogIndexPayload,
+  type CatalogItem,
+  type EntryPayload,
+  type MirrorStatus,
+} from "../../shared/mirror";
 
-type MirrorStatus = {
-  mirror: {
-    sourceBaseUrl: string;
-    originalSite: string;
-    attribution: string;
-    disclaimer: string;
-  };
-  counts: {
-    entries: number;
-    torrents: number;
-    anilistMedia: number;
-  };
-  integrity: {
-    entriesWithoutTorrents: number;
-    entriesWithoutAniList: number;
-    sourceListIdCount: number;
-    sourceEntryCount: number;
-    sourceTorrentCount: number;
-    listIdParity: string | null;
-    expandedTorrentParity: string | null;
-  };
-  sync: {
-    lastRebuildStartedAt: string | null;
-    lastRebuildFinishedAt: string | null;
-    lastRebuildMode: string | null;
-    lastError: string | null;
-    summary: Record<string, unknown> | null;
-  };
-};
-
-type CatalogItem = {
-  alId: number;
-  recordId: string;
-  comparisonLinks: string[];
-  excerpt: string | null;
-  incomplete: boolean;
-  sourceUpdatedAt: string;
-  titles: {
-    userPreferred: string | null;
-    english: string | null;
-    display: string;
-  };
-  coverImage: {
-    extraLarge: string | null;
-    color: string | null;
-  };
-  season: string | null;
-  seasonYear: number | null;
-  startYear: number | null;
-  format: string | null;
-  status: string | null;
-  episodes: number | null;
-  averageScore: number | null;
-  torrentCount: number;
-  bestTorrentCount: number;
-};
-
-type CatalogPayload = {
-  pagination: {
-    count: number;
-    nextOffset: number | null;
-  };
-  items: CatalogItem[];
-};
-
-type EntryPayload = {
-  source: {
-    originalSite: string;
-    originalEntryUrl: string;
-  };
-  entry: {
-    alId: number;
-    recordId: string;
-    comparisonLinks: string[];
-    notes: string;
-    theoreticalBest: string | null;
-    incomplete: boolean;
-    sourceCreatedAt: string;
-    sourceUpdatedAt: string;
-    torrentCount: number;
-    bestTorrentCount: number;
-    titles: {
-      userPreferred: string | null;
-      english: string | null;
-      display: string;
-    };
-    coverImage: {
-      extraLarge: string | null;
-      color: string | null;
-    };
-    season: string | null;
-    seasonYear: number | null;
-    startYear: number | null;
-    format: string | null;
-    status: string | null;
-    episodes: number | null;
-    duration: number | null;
-    averageScore: number | null;
-    genres: string[];
-    relations: Array<{ node?: { id?: number; title?: { userPreferred?: string | null; english?: string | null } } }>;
-  };
-  torrents: Array<{
-    id: string;
-    releaseGroup: string;
-    tracker: string;
-    sourceUrl: string | null;
-    url: string | null;
-    sourceGroupedUrl: string | null;
-    groupedUrl: string | null;
-    infoHash: string | null;
-    dualAudio: boolean;
-    isBest: boolean;
-    tags: string[];
-    files: Array<{ length: number; name: string }>;
-    sourceUpdatedAt: string;
-  }>;
-};
+const DATA_ROOT = "/mirror-data";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -129,8 +20,9 @@ boot().catch((error) => {
 });
 
 async function boot() {
-  const status = await fetchJson<MirrorStatus>("/api/v1/status");
+  const status = await fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+
   if (pathname === "/") {
     await renderCatalog(status);
     return;
@@ -138,7 +30,7 @@ async function boot() {
 
   const match = pathname.match(/^\/(\d+)$/);
   if (!match) {
-    appRoot.innerHTML = renderFatal("Unknown route. Return to the catalog and try again.");
+    appRoot.innerHTML = renderFatal("Unknown route. Return to the index and try again.");
     return;
   }
 
@@ -146,52 +38,83 @@ async function boot() {
 }
 
 async function renderCatalog(status: MirrorStatus) {
+  const catalog = await fetchJson<CatalogIndexPayload>(`${DATA_ROOT}/catalog.json`);
+
   appRoot.innerHTML = `
     ${renderShell(status, "catalog")}
     <main class="page page--catalog">
-      <section class="masthead">
-        <div class="eyebrow">Unofficial mirror</div>
-        <h1>SeaDex, rebuilt for resilience.</h1>
-        <p class="lede">
-          Cached release recommendations, torrent choices, and AniList metadata, served from a calmer pipeline
-          that prefers accuracy over improvisation.
-        </p>
-        <div class="masthead__meta">
-          <span>${status.counts.entries} entries mirrored</span>
-          <span>${status.counts.torrents} torrent rows cached</span>
-          <span>${formatDate(status.sync.lastRebuildFinishedAt)} last rebuild</span>
+      <section class="hero">
+        <div class="hero__copy animate-in">
+          <div class="eyebrow">SeaDex mirror / static build</div>
+          <h1>Enthusiast releases, mirrored without the quota pain.</h1>
+          <p class="lede">
+            Your portal to the ultimate enthusiast releases: anime with high-confidence recommendations,
+            comparison-backed notes, and cached torrent choices served from a static Pages pipeline.
+          </p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="#catalog-controls">Browse catalog</a>
+            <a class="button button--ghost" href="https://releases.moe/" target="_blank" rel="noreferrer">Open SeaDex</a>
+          </div>
         </div>
+        <aside class="hero__stats animate-in">
+          <div class="stat-card">
+            <span class="stat-card__label">Entries mirrored</span>
+            <strong>${formatNumber(status.counts.entries)}</strong>
+            <small>Full SeaDex snapshot, rebuilt offline.</small>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Torrent rows</span>
+            <strong>${formatNumber(status.counts.torrents)}</strong>
+            <small>Readable release choices with best-pick flags intact.</small>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Last rebuild</span>
+            <strong>${formatDate(status.sync.lastRebuildFinishedAt)}</strong>
+            <small>${status.sync.lastRebuildMode ?? "Static snapshot"} pipeline.</small>
+          </div>
+        </aside>
       </section>
 
-      <section class="status-band">
-        ${renderStatusBand(status)}
+      <section class="status-strip animate-in">
+        ${renderStatusStrip(status)}
       </section>
 
-      <section class="toolbelt">
-        <label class="control">
-          <span>Search</span>
-          <input id="search" type="search" placeholder="Title, note, or AniList id" />
-        </label>
-        <label class="control">
-          <span>Format</span>
-          <select id="format">
-            <option value="">All</option>
-            <option value="TV">TV</option>
-            <option value="MOVIE">Movie</option>
-            <option value="OVA">OVA</option>
-            <option value="ONA">ONA</option>
-            <option value="SPECIAL">Special</option>
-          </select>
-        </label>
-        <label class="control">
-          <span>Sort</span>
-          <select id="sort">
-            <option value="updated">Recently updated</option>
-            <option value="title">Title</option>
-            <option value="year">Year</option>
-            <option value="score">Score</option>
-          </select>
-        </label>
+      <section class="controls" id="catalog-controls">
+        <div class="controls__heading">
+          <div>
+            <div class="eyebrow">Catalog</div>
+            <h2>Browse like SeaDex, served like a static site.</h2>
+          </div>
+          <p>
+            Search by title, note text, or AniList id. The list view stays compact and editorial on purpose.
+          </p>
+        </div>
+        <div class="toolbelt">
+          <label class="control">
+            <span>Search</span>
+            <input id="search" type="search" placeholder="Title, note, or AniList id" />
+          </label>
+          <label class="control">
+            <span>Format</span>
+            <select id="format">
+              <option value="">All formats</option>
+              <option value="TV">TV</option>
+              <option value="MOVIE">Movie</option>
+              <option value="OVA">OVA</option>
+              <option value="ONA">ONA</option>
+              <option value="SPECIAL">Special</option>
+            </select>
+          </label>
+          <label class="control">
+            <span>Sort</span>
+            <select id="sort">
+              <option value="updated">Recently updated</option>
+              <option value="title">Title</option>
+              <option value="year">Year</option>
+              <option value="score">Score</option>
+            </select>
+          </label>
+        </div>
       </section>
 
       <section class="catalog-note" id="catalog-note">Loading mirrored entries...</section>
@@ -226,15 +149,14 @@ async function renderCatalog(status: MirrorStatus) {
     note.textContent = "Loading mirrored entries...";
 
     try {
-      const params = new URLSearchParams({
+      const payload = filterCatalogItems(catalog.items, {
         search: search.value.trim(),
         format: format.value,
         sort: sort.value,
-        limit: "18",
-        offset: String(offset),
+        limit: 24,
+        offset,
       });
 
-      const payload = await fetchJson<CatalogPayload>(`/api/v1/catalog?${params.toString()}`);
       if (reset && payload.items.length === 0) {
         stream.innerHTML = "";
         note.textContent = "No mirrored entries matched that filter.";
@@ -243,12 +165,13 @@ async function renderCatalog(status: MirrorStatus) {
       }
 
       stream.insertAdjacentHTML("beforeend", payload.items.map(renderCatalogEntry).join(""));
-      offset = payload.pagination.nextOffset ?? offset;
+      const shownCount = Math.min(payload.pagination.total, payload.filters.offset + payload.pagination.count);
+      offset = payload.pagination.nextOffset ?? payload.filters.offset;
       loadMore.hidden = payload.pagination.nextOffset === null;
       note.textContent =
         payload.pagination.nextOffset === null
-          ? `${payload.items.length + (reset ? 0 : offset)} entries loaded from the mirror.`
-          : "Showing the current slice of mirrored entries.";
+          ? `${shownCount} entries loaded from the mirror.`
+          : `Showing ${shownCount} of ${payload.pagination.total} mirrored entries.`;
     } catch (error) {
       note.textContent = `Catalog load failed: ${error instanceof Error ? error.message : String(error)}`;
       loadMore.hidden = true;
@@ -277,80 +200,100 @@ async function renderEntry(status: MirrorStatus, alId: number) {
     </main>
   `;
 
-  const payload = await fetchJson<EntryPayload>(`/api/v1/entries/${alId}`);
+  const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
   const entry = payload.entry;
+  const relationCards = renderRelationCards(entry.relations);
+  const comparisonLinks = renderComparisonLinks(entry.comparisonLinks);
 
   appRoot.innerHTML = `
     ${renderShell(status, "entry")}
-    <main class="page page--entry animate-in">
-      <a class="back-link" href="/">
+    <main class="page page--entry">
+      <a class="back-link animate-in" href="/">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        Return to catalog
+        Back to index
       </a>
+
       <section class="entry-hero">
-        <div class="entry-poster">
+        <div class="entry-poster animate-in">
           ${
             entry.coverImage.extraLarge
               ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} poster" />`
               : `<div class="poster-fallback">AniList art not cached yet.</div>`
           }
         </div>
-        <div class="entry-copy">
+
+        <div class="entry-copy animate-in">
           <div class="eyebrow">AniList ${entry.alId}</div>
           <h1>${escapeHtml(entry.titles.display)}</h1>
           <p class="lede">
-            Mirrored from SeaDex with ${entry.torrentCount} cached torrent rows and ${entry.bestTorrentCount} marked best picks.
+            SeaDex recommends from a field of ${entry.torrentCount} mirrored release rows, with ${entry.bestTorrentCount}
+            best picks highlighted.
           </p>
           <div class="chip-row">
             ${entry.format ? chip(entry.format) : ""}
             ${entry.status ? chip(entry.status) : ""}
             ${entry.startYear ? chip(String(entry.startYear)) : ""}
             ${entry.episodes ? chip(`${entry.episodes} eps`) : ""}
-            ${entry.averageScore ? chip(`${entry.averageScore}%`) : ""}
-            ${entry.incomplete ? chip("Marked incomplete") : ""}
+            ${entry.averageScore ? chip(`${entry.averageScore}% score`) : ""}
+            ${entry.incomplete ? chip("Incomplete entry") : ""}
           </div>
           <div class="entry-actions">
-            <a class="button button--primary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
-              Open original SeaDex entry
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            </a>
-            ${
-              entry.comparisonLinks[0]
-                ? `<a class="button button--quiet" href="${escapeHtml(entry.comparisonLinks[0])}" target="_blank" rel="noreferrer">
-                    Open comparison
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                   </a>`
-                : ""
-            }
+            <a class="button button--primary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">Open SeaDex entry</a>
+            ${comparisonLinks}
           </div>
         </div>
       </section>
 
       <section class="entry-grid">
-        <article class="entry-panel">
-          <h2>Editorial notes</h2>
-          <p>${escapeHtml(entry.notes || "No note was provided on the source entry.")}</p>
+        <article class="entry-panel animate-in">
+          <div class="entry-panel__header">
+            <div class="eyebrow">Recommendation</div>
+            <h2>Editorial notes</h2>
+          </div>
+          <p class="entry-notes">${escapeHtml(entry.notes || "No note was provided on the source entry.")}</p>
           ${
             entry.theoreticalBest
               ? `<p class="entry-detail"><strong>Theoretical best:</strong> ${escapeHtml(entry.theoreticalBest)}</p>`
               : ""
           }
-          <p class="entry-detail"><strong>Mirrored update:</strong> ${formatDate(entry.sourceUpdatedAt)}</p>
+          <p class="entry-detail"><strong>Mirror updated:</strong> ${formatDate(entry.sourceUpdatedAt)}</p>
         </article>
 
-        <article class="entry-panel">
-          <h2>Metadata</h2>
+        <article class="entry-panel animate-in">
+          <div class="entry-panel__header">
+            <div class="eyebrow">Snapshot</div>
+            <h2>Metadata</h2>
+          </div>
           <div class="fact-list">
             <span>Season</span><span>${escapeHtml(entry.season ?? "Unknown")}</span>
             <span>Duration</span><span>${entry.duration ? `${entry.duration} min` : "Unknown"}</span>
             <span>Genres</span><span>${entry.genres.length ? escapeHtml(entry.genres.join(", ")) : "None cached"}</span>
             <span>Record id</span><span>${escapeHtml(entry.recordId)}</span>
+            <span>Best picks</span><span>${entry.bestTorrentCount}</span>
+            <span>Total options</span><span>${entry.torrentCount}</span>
           </div>
         </article>
       </section>
 
-      <section class="entry-panel">
-        <h2>Torrent choices</h2>
+      ${
+        relationCards
+          ? `
+            <section class="entry-panel entry-panel--relations animate-in">
+              <div class="entry-panel__header">
+                <div class="eyebrow">Franchise context</div>
+                <h2>Related titles</h2>
+              </div>
+              <div class="relation-grid">${relationCards}</div>
+            </section>
+          `
+          : ""
+      }
+
+      <section class="entry-panel animate-in">
+        <div class="entry-panel__header">
+          <div class="eyebrow">Release choices</div>
+          <h2>Torrent rows</h2>
+        </div>
         <div class="torrent-table">
           ${payload.torrents.map(renderTorrentRow).join("")}
         </div>
@@ -364,9 +307,9 @@ function renderShell(status: MirrorStatus, page: "catalog" | "entry") {
     <header class="frame">
       <a class="brand" href="/">
         <span class="brand__badge">SM</span>
-        <span>
+        <span class="brand__copy">
           <strong>SeaDex Mirror</strong>
-          <small>Community resilience build</small>
+          <small>Static Pages build, local-friendly generator</small>
         </span>
       </a>
       <div class="frame__meta">
@@ -379,34 +322,26 @@ function renderShell(status: MirrorStatus, page: "catalog" | "entry") {
   `;
 }
 
-function renderStatusBand(status: MirrorStatus) {
-  const listParity = status.integrity.listIdParity === "match" ? "List parity locked." : "List parity needs attention.";
-  const torrentParity =
-    status.integrity.expandedTorrentParity === "match" ? "Expanded torrents are aligned." : "Expanded torrents need review.";
-
+function renderStatusStrip(status: MirrorStatus) {
   return `
-    <div class="status-band__item">
-      <strong>Source integrity</strong>
-      <p>${listParity} ${torrentParity}</p>
-    </div>
-    <div class="status-band__item">
-      <strong>Mirror coverage</strong>
-      <p>${status.counts.entries} entries, ${status.counts.torrents} torrent rows, ${status.counts.anilistMedia} AniList records.</p>
-    </div>
-    <div class="status-band__item">
-      <strong>Current risk</strong>
-      <p>${
-        status.sync.lastError
-          ? `Last rebuild hit an error: ${escapeHtml(status.sync.lastError)}`
-          : "No active rebuild error is cached."
-      }</p>
-    </div>
+    <article class="status-strip__item">
+      <strong>Source parity</strong>
+      <p>${status.integrity.listIdParity === "match" ? "List ids match the expanded entry set." : "List parity needs attention."}</p>
+    </article>
+    <article class="status-strip__item">
+      <strong>Static pipeline</strong>
+      <p>Normal visitors hit cached JSON files instead of a live quota-limited database.</p>
+    </article>
+    <article class="status-strip__item">
+      <strong>Coverage</strong>
+      <p>${formatNumber(status.counts.anilistMedia)} AniList records enriched for this snapshot.</p>
+    </article>
   `;
 }
 
 function renderCatalogEntry(item: CatalogItem) {
   return `
-    <article class="result animate-in" style="animation-delay: ${Math.random() * 0.15}s;">
+    <article class="result animate-in">
       <a class="result__link" href="/${item.alId}">
         <div class="result__poster">
           ${
@@ -415,21 +350,31 @@ function renderCatalogEntry(item: CatalogItem) {
               : `<div class="poster-fallback poster-fallback--small">No cover cached</div>`
           }
         </div>
+
         <div class="result__body">
-          <div class="result__heading">
-            <div class="eyebrow">AniList ${item.alId}</div>
-            <h2>${escapeHtml(item.titles.display)}</h2>
+          <div class="result__topline">
+            <div class="result__heading">
+              <div class="eyebrow">AniList ${item.alId}</div>
+              <h2>${escapeHtml(item.titles.display)}</h2>
+            </div>
+            <div class="result__signals">
+              ${item.bestTorrentCount ? `<span class="signal signal--best">${item.bestTorrentCount} best</span>` : `<span class="signal">${item.torrentCount} options</span>`}
+              ${item.incomplete ? `<span class="signal signal--warn">Incomplete</span>` : ""}
+            </div>
           </div>
+
           <div class="chip-row chip-row--compact">
             ${item.format ? chip(item.format) : ""}
             ${item.startYear ? chip(String(item.startYear)) : ""}
-            ${item.bestTorrentCount ? chip(`${item.bestTorrentCount} best`) : chip(`${item.torrentCount} options`)}
-            ${item.incomplete ? chip("Incomplete") : ""}
+            ${item.status ? chip(item.status) : ""}
+            ${item.comparisonLinks.length ? chip(`${item.comparisonLinks.length} comparison`) : ""}
           </div>
+
           <p class="result__excerpt">${escapeHtml(item.excerpt ?? "No editorial note cached yet.")}</p>
+
           <div class="result__footer">
             <span>${formatDate(item.sourceUpdatedAt)}</span>
-            <span>${item.torrentCount} torrents</span>
+            <span>${item.torrentCount} torrents mirrored</span>
           </div>
         </div>
       </a>
@@ -439,35 +384,81 @@ function renderCatalogEntry(item: CatalogItem) {
 
 function renderTorrentRow(torrent: EntryPayload["torrents"][number]) {
   const primaryUrl = torrent.url ?? torrent.groupedUrl ?? null;
+
   return `
-    <article class="torrent-row animate-in" style="animation-delay: ${Math.random() * 0.15}s;">
+    <article class="torrent-row animate-in">
       <div class="torrent-row__main">
         <div class="torrent-row__topline">
-          <h3>${escapeHtml(torrent.releaseGroup || "Unknown group")}</h3>
+          <div>
+            <h3>${escapeHtml(torrent.releaseGroup || "Unknown group")}</h3>
+            <p class="torrent-row__subtitle">${escapeHtml(torrent.tracker || "Unknown tracker")} / updated ${formatDate(torrent.sourceUpdatedAt)}</p>
+          </div>
           <div class="chip-row chip-row--compact">
-            ${chip(torrent.tracker || "Unknown")}
             ${torrent.isBest ? chip("Best pick") : chip("Alt pick")}
             ${torrent.dualAudio ? chip("Dual audio") : chip("Single audio")}
             ${torrent.tags.map((tag) => chip(tag)).join("")}
           </div>
         </div>
+
         <ul class="file-list">
           ${torrent.files.slice(0, 6).map((file) => `<li>${escapeHtml(file.name)} <span>${formatBytes(file.length)}</span></li>`).join("")}
         </ul>
       </div>
+
       <div class="torrent-row__actions">
         ${
           primaryUrl
-            ? `<a class="button button--primary" href="${escapeHtml(primaryUrl)}" target="_blank" rel="noreferrer">
-                 Open torrent
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-               </a>`
+            ? `<a class="button button--primary" href="${escapeHtml(primaryUrl)}" target="_blank" rel="noreferrer">Open torrent</a>`
             : `<span class="button button--ghost">No source link</span>`
         }
-        ${torrent.infoHash ? `<code>${escapeHtml(torrent.infoHash)}</code>` : `<span class="muted">Info hash redacted</span>`}
+        ${torrent.sourceGroupedUrl ? `<a class="button button--quiet" href="${escapeHtml(torrent.groupedUrl ?? torrent.sourceGroupedUrl)}" target="_blank" rel="noreferrer">Open grouped page</a>` : ""}
+        ${torrent.infoHash ? `<code>${escapeHtml(torrent.infoHash)}</code>` : `<span class="muted">Info hash not available</span>`}
       </div>
     </article>
   `;
+}
+
+function renderComparisonLinks(links: string[]) {
+  if (links.length === 0) {
+    return "";
+  }
+
+  return links
+    .slice(0, 2)
+    .map((link, index) => {
+      const label = index === 0 ? "Open comparison" : `Comparison ${index + 1}`;
+      return `<a class="button button--quiet" href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${label}</a>`;
+    })
+    .join("");
+}
+
+function renderRelationCards(relations: EntryPayload["entry"]["relations"]) {
+  return relations
+    .filter((relation) => relation.node?.id && relation.node.title)
+    .slice(0, 12)
+    .map((relation) => {
+      const node = relation.node!;
+      const title = node.title?.english ?? node.title?.userPreferred ?? String(node.id);
+      const year = node.startDate?.year ?? node.seasonYear ?? null;
+      return `
+        <article class="relation-card">
+          <div class="relation-card__poster">
+            ${
+              node.coverImage?.extraLarge
+                ? `<img src="${escapeHtml(node.coverImage.extraLarge)}" alt="${escapeHtml(title)} cover" />`
+                : `<div class="poster-fallback poster-fallback--small">No art</div>`
+            }
+          </div>
+          <div class="relation-card__body">
+            <span class="relation-card__type">${formatRelationType(relation.relationType)}</span>
+            <h3>${escapeHtml(title)}</h3>
+            <p>${[node.format, year ? String(year) : null, node.episodes ? `${node.episodes} eps` : null].filter(Boolean).join(" / ") || "Metadata unavailable"}</p>
+            <a class="relation-card__link" href="https://anilist.co/anime/${node.id}" target="_blank" rel="noreferrer">View on AniList</a>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderFatal(message: string) {
@@ -483,18 +474,24 @@ function renderFatal(message: string) {
   `;
 }
 
-function chip(label: string, iconHtml: string = "") {
-  return `<span class="chip">${iconHtml}${escapeHtml(label)}</span>`;
+function chip(label: string) {
+  return `<span class="chip">${escapeHtml(label)}</span>`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: { accept: "application/json" },
   });
+
   if (!response.ok) {
+    if (response.status === 404 && url.startsWith(DATA_ROOT)) {
+      throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
+    }
+
     const message = await response.text();
     throw new Error(message || `Request failed with ${response.status}`);
   }
+
   return (await response.json()) as T;
 }
 
@@ -512,6 +509,7 @@ function debounce(callback: () => void, delayMs: number) {
     if (timeoutId !== null) {
       window.clearTimeout(timeoutId);
     }
+
     timeoutId = window.setTimeout(() => {
       callback();
     }, delayMs);
@@ -522,6 +520,7 @@ function formatDate(value: string | null) {
   if (!value) {
     return "No timestamp";
   }
+
   const date = new Date(value);
   return Number.isNaN(date.valueOf())
     ? value
@@ -536,6 +535,7 @@ function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) {
     return "Unknown size";
   }
+
   const units = ["B", "KB", "MB", "GB", "TB"];
   let amount = value;
   let unitIndex = 0;
@@ -543,7 +543,23 @@ function formatBytes(value: number) {
     amount /= 1024;
     unitIndex += 1;
   }
+
   return `${amount.toFixed(amount >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function formatRelationType(value: string | null | undefined) {
+  if (!value) {
+    return "Related";
+  }
+
+  return value
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function escapeHtml(value: string) {
