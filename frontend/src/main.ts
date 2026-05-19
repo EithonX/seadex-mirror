@@ -856,7 +856,7 @@ function renderShell(status: MirrorStatus, context: "index" | "entry" | "about" 
 
         <div class="site-header__actions">
           <a class="ghost-icon-button" href="${escapeHtml(originalSiteUrl)}" target="_blank" rel="noreferrer" aria-label="Open original SeaDex site">
-            ${renderLogInIcon()}
+            ${renderExternalIcon()}
           </a>
           <button id="theme-toggle" class="ghost-icon-button" type="button" aria-label="Toggle theme">
             <span class="theme-sun">${renderSunIcon()}</span>

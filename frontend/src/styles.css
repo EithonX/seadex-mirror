@@ -154,7 +154,7 @@ img {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .brand-link {
@@ -242,7 +242,8 @@ img {
   gap: 0.65rem;
   min-height: 2.25rem;
   width: min(280px, 100%);
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: 0;
   padding: 0 0.85rem;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
@@ -323,6 +324,21 @@ img {
   transform: scale(1.05);
 }
 
+.ghost-icon-button img {
+  width: 1.05rem;
+  height: 1.05rem;
+  object-fit: contain;
+  opacity: 0.75;
+  filter: grayscale(20%);
+  transition: transform 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+}
+
+.ghost-icon-button:hover img {
+  transform: scale(1.08);
+  opacity: 1;
+  filter: grayscale(0%);
+}
+
 .theme-moon {
   display: none;
 }
@@ -345,18 +361,21 @@ img {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .catalog-toolbar__group {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .catalog-toolbar__group--grow {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 /* Search Box Casing */
@@ -514,7 +533,7 @@ img {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 100%;
+  min-width: 130px;
 }
 
 .custom-select__label {
@@ -587,11 +606,16 @@ img {
   border-color: var(--text);
 }
 
-/* Arrow rotation when active/expanded */
+.custom-select[data-open] .custom-select__trigger {
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+}
+
 .custom-select[data-open] .custom-select__arrow {
   transform: translateY(-30%) rotate(-135deg);
   border-color: var(--text);
 }
+
 
 /* Dropdown Menu Overlay */
 .custom-select__dropdown {
@@ -602,12 +626,12 @@ img {
   min-width: 180px;
   max-height: 280px;
   overflow-y: auto;
-  background: rgba(18, 18, 22, 0.95);
+  background: var(--bg-elevated);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 16px -8px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow);
   z-index: 1000;
   padding: 0.35rem;
   opacity: 0;
@@ -1793,6 +1817,49 @@ img {
   font-weight: 500;
 }
 
+@media (min-width: 640px) {
+  .search-dialog__panel {
+    padding: 0;
+  }
+  .search-dialog__header {
+    display: none;
+  }
+  .control-shell--dialog {
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 1rem 1.25rem;
+    min-height: 3.5rem;
+    width: 100%;
+  }
+  .control-shell--dialog:focus-within {
+    border-color: transparent;
+    border-bottom: 1px solid var(--line-strong);
+    background: transparent;
+    box-shadow: none;
+  }
+  .control-shell--dialog:focus-within svg {
+    color: var(--text);
+  }
+  .control-shell--dialog .control-input {
+    font-size: 1.05rem;
+  }
+  .control-shell--dialog svg {
+    width: 1.2rem;
+    height: 1.2rem;
+  }
+  .search-dialog__meta {
+    margin: 0.75rem 1.25rem 0;
+  }
+  .search-results {
+    margin-top: 0.5rem;
+    padding: 0 1.25rem 1.25rem;
+    max-height: 400px;
+  }
+}
+
 /* ==========================================================================
    Sheet (Database View) Page Redesign
    ========================================================================== */
@@ -2067,21 +2134,26 @@ img {
   }
 
   /* Catalog page select columns (Format, Season) */
-  .catalog-page .control-select {
+  .catalog-page .control-select,
+  .catalog-page .custom-select.control-select {
     grid-column: span 2;
     width: 100%;
+    min-width: 0;
   }
 
   /* Catalog page view/sort select in the second group */
-  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select {
+  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select,
+  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .custom-select.control-select {
     grid-column: span 2;
     width: 100%;
+    min-width: 0;
   }
 
   /* Sheet backup page select columns (Format, View) */
   .sheet-pill-select {
     grid-column: span 3;
     width: 100%;
+    min-width: 0;
   }
 
   .sheet-modebar {
@@ -2256,11 +2328,13 @@ img {
 
 @media (max-width: 600px) {
   /* Catalog page dropdowns: Format and Season side-by-side (span 3), View select takes full width (span 6) */
-  .catalog-page .catalog-toolbar__group--grow .control-select {
+  .catalog-page .catalog-toolbar__group--grow .control-select,
+  .catalog-page .catalog-toolbar__group--grow .custom-select.control-select {
     grid-column: span 3;
   }
 
-  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select {
+  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select,
+  .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .custom-select.control-select {
     grid-column: span 6;
   }
 
