@@ -1164,10 +1164,24 @@ img {
 
 .catalog-page,
 .entry-layout,
-.sheet-page,
 .about-page {
   width: 100%;
 }
+
+/* Sheet page breaks out of the container to go full-bleed */
+.page--sheet {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  margin: 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 
 /* ==========================================================================
    Anime Entry (Details Page) Redesign
@@ -1864,12 +1878,156 @@ img {
    Sheet (Database View) Page Redesign
    ========================================================================== */
 
-.sheet-page {
+/* Slim topbar — sits directly below the site header */
+.sheet-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1.25rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elevated);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.sheet-topbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 100%;
+}
+
+.sheet-tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+  white-space: nowrap;
+}
+
+.sheet-tab-button:hover {
+  color: var(--text);
+}
+
+.sheet-tab-button.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.sheet-tab-button svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.sheet-tab-button.is-active svg {
+  opacity: 1;
+}
+
+.sheet-topbar__meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sheet-topbar__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .sheet-topbar__label {
+    display: inline;
+  }
+}
+
+.sheet-topbar__upstream {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  white-space: nowrap;
+}
+
+.sheet-topbar__upstream:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+}
+
+.sheet-topbar__upstream svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+}
+
+/* Full-bleed iframe area */
+.sheet-frame-shell {
+  flex: 1;
+  height: 0; /* forces the flex child to fill rather than overflow */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .sheet-frame-shell {
+  background: #fff;
+}
+
+.sheet-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  min-height: 0;
+  background: #ffffff;
+  display: block;
+}
+
+/* Backup table panel — re-introduces container layout */
+.sheet-backup-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sheet-backup-inner {
+  width: var(--container);
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
+/* Keep old kicker for about page if used */
 .sheet-kicker {
   color: #ef4444;
   font-size: 0.75rem;
@@ -1878,75 +2036,21 @@ img {
   font-weight: 800;
 }
 
-.sheet-modebar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1.5rem;
-  flex-wrap: wrap;
+/* Lock page height and hide page scrollbar only on the sheet page */
+body.is-sheet-page,
+body:has(.page--sheet) {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
 }
 
-.sheet-modebar__copy {
-  max-width: 46rem;
-}
-
-.sheet-modebar__copy h1 {
-  margin: 0.25rem 0 0.5rem;
-  font-size: 2.2rem;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  font-weight: 800;
-}
-
-.sheet-modebar__copy p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.6;
-  font-size: 0.95rem;
-}
-
-.sheet-modebar__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.sheet-mode-button {
-  min-height: 2.35rem;
-  padding: 0 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--muted);
-  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.01);
-  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
-}
-
-.sheet-mode-button:hover,
-.sheet-mode-button.is-active {
-  border-color: var(--line-strong);
-  background: var(--panel-soft);
-  color: var(--text);
-}
-
-.sheet-frame-shell {
-  min-height: 75vh;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow);
+body.is-sheet-page #app,
+body:has(.page--sheet) #app {
+  height: 100vh;
+  max-height: 100vh;
   overflow: hidden;
 }
 
-.sheet-frame {
-  width: 100%;
-  min-height: 75vh;
-  border: 0;
-  background: #ffffff;
-}
 
 /* ==========================================================================
    About Page Essay Redesign
@@ -2156,9 +2260,8 @@ img {
     min-width: 0;
   }
 
-  .sheet-modebar {
-    align-items: stretch;
-    flex-direction: column;
+  .sheet-topbar {
+    padding: 0 0.75rem;
   }
 }
 
@@ -2182,11 +2285,6 @@ img {
 
   .ghost-icon-button--desktop {
     display: none;
-  }
-
-  .sheet-frame-shell,
-  .sheet-frame {
-    min-height: 65vh;
   }
 }
 

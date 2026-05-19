@@ -337,6 +337,7 @@ async function renderCatalog(status: MirrorStatus) {
 }
 
 async function renderSheet(status: MirrorStatus) {
+  document.body.classList.add("is-sheet-page");
   const sheet = await loadSheetPayload();
   const state = readCatalogStateFromUrl();
   let sheetView: "live" | "backup" = readSheetViewFromUrl();
@@ -346,34 +347,38 @@ async function renderSheet(status: MirrorStatus) {
     "sheet",
     `
       <main class="page page--sheet">
-        <section class="sheet-page">
-          <div class="sheet-modebar">
-            <div class="sheet-modebar__copy">
-              <p class="sheet-kicker">Sheet</p>
-              <h1>SeaDex sheet mirror</h1>
-              <p>Live embedded sheet by default, with a local backup table when the upstream embed is unavailable.</p>
-            </div>
-            <div class="sheet-modebar__actions">
-              <button id="sheet-live-tab" class="sheet-mode-button${sheetView === "live" ? " is-active" : ""}" type="button">Live sheet</button>
-              <button id="sheet-backup-tab" class="sheet-mode-button${sheetView === "backup" ? " is-active" : ""}" type="button">Mirror backup</button>
-              <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
-                <span>${renderExternalIcon()}</span>
-                <span>Open upstream</span>
-              </a>
-            </div>
+        <div class="sheet-topbar">
+          <div class="sheet-topbar__tabs">
+            <button id="sheet-live-tab" class="sheet-tab-button${sheetView === "live" ? " is-active" : ""}" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+              Live sheet
+            </button>
+            <button id="sheet-backup-tab" class="sheet-tab-button${sheetView === "backup" ? " is-active" : ""}" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Mirror backup
+            </button>
           </div>
+          <div class="sheet-topbar__meta">
+            <span class="sheet-topbar__label">SeaDex Sheet</span>
+            <a class="sheet-topbar__upstream" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
+              ${renderExternalIcon()}
+              Open upstream
+            </a>
+          </div>
+        </div>
 
-          <section id="sheet-live-panel" class="sheet-frame-shell"${sheetView === "backup" ? " hidden" : ""}>
-            <iframe
-              class="sheet-frame"
-              src="${escapeHtml(UPSTREAM_SHEET_EMBED_URL)}"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-              title="SeaDex sheet embed"
-            ></iframe>
-          </section>
+        <section id="sheet-live-panel" class="sheet-frame-shell"${sheetView === "backup" ? " hidden" : ""}>
+          <iframe
+            class="sheet-frame"
+            src="${escapeHtml(UPSTREAM_SHEET_EMBED_URL)}"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+            title="SeaDex sheet embed"
+          ></iframe>
+        </section>
 
-          <section id="sheet-backup-panel"${sheetView === "live" ? " hidden" : ""}>
+        <section id="sheet-backup-panel" class="sheet-backup-wrap"${sheetView === "live" ? " hidden" : ""}>
+          <div class="sheet-backup-inner">
             <div class="catalog-toolbar catalog-toolbar--sheet">
               <div class="catalog-toolbar__group catalog-toolbar__group--grow">
               <label class="control-shell control-shell--search" for="sheet-search">
@@ -445,10 +450,11 @@ async function renderSheet(status: MirrorStatus) {
                 </div>
               </div>
             </div>
-          </section>
+          </div>
         </section>
       </main>
       ${renderSearchDialog()}
+
     `,
   );
 
