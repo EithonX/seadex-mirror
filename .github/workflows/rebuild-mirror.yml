@@ -69,12 +69,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error \
+          status_code="$(
+            curl --silent --show-error --output /tmp/cloudflare-pages-project.json --write-out "%{http_code}" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT_NAME" \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             --header "Content-Type: application/json" \
-            > /tmp/cloudflare-pages-project.json
-          node -e "const fs=require('fs'); const payload=JSON.parse(fs.readFileSync('/tmp/cloudflare-pages-project.json','utf8')); if (!payload.success) { console.error(JSON.stringify(payload.errors ?? payload, null, 2)); process.exit(1); } console.log('Verified Cloudflare Pages project access.');"
+          )"
+          node -e "const fs=require('fs'); const statusCode=process.argv[1]; const payload=JSON.parse(fs.readFileSync('/tmp/cloudflare-pages-project.json','utf8')); if (statusCode !== '200' || !payload.success) { console.error('Cloudflare Pages access check failed.'); console.error('HTTP status:', statusCode); console.error(JSON.stringify(payload.errors ?? payload, null, 2)); process.exit(1); } console.log('Verified Cloudflare Pages project access.');" "$status_code"
 
       - name: Deploy Pages site
         if: steps.mirror.outputs.skipped != 'true'
