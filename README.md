@@ -98,6 +98,10 @@ Workflow split:
 - `.github/workflows/deploy-site.yml`
   Runs on `main` pushes that touch app/workflow/build files, then builds and deploys the site using the checked-in snapshot data.
 
+Cloudflare Pages deployment note:
+
+- These workflows use Direct Upload through Wrangler and explicitly deploy to the production branch (`main`), so successful runs update `seadex.pages.dev` instead of only creating a preview deployment URL.
+
 ## Frontend goals
 
 - stay close to SeaDex's editorial browsing feel
