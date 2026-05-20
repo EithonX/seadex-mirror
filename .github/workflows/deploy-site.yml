@@ -47,6 +47,17 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify Cloudflare Pages access
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header "Content-Type: application/json" \
+            > /tmp/cloudflare-pages-project.json
+          node -e "const fs=require('fs'); const payload=JSON.parse(fs.readFileSync('/tmp/cloudflare-pages-project.json','utf8')); if (!payload.success) { console.error(JSON.stringify(payload.errors ?? payload, null, 2)); process.exit(1); } console.log('Verified Cloudflare Pages project access.');"
+
       - name: Deploy Pages site
         uses: cloudflare/wrangler-action@v3
         with:
