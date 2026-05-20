@@ -655,6 +655,8 @@ async function renderSheet(status: MirrorStatus) {
 }
 
 function renderAbout(status: MirrorStatus) {
+  const rebuiltLabel = status.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : "Unknown";
+
   appRoot.innerHTML = renderPageFrame(
     status,
     "about",
@@ -662,37 +664,55 @@ function renderAbout(status: MirrorStatus) {
       <main class="page page--about">
         <section class="about-page">
           <article class="about-essay">
-            <p class="sheet-kicker">About</p>
-            <h1>Why this mirror exists</h1>
-            <p>
-              SeaDex is too useful to be fragile. This mirror exists to keep the browsing experience fast, cheap to host, and readable on both desktop and mobile without wasting quota on a live database for every page view.
-            </p>
-            <p>
-              The project is maintained by <strong>EithonX</strong>. The idea is not to replace SeaDex or erase the original work. The idea is to preserve the experience, mirror the public data responsibly, and improve the parts that matter for day to day use.
-            </p>
+            <div class="about-hero">
+              <p class="sheet-kicker">About</p>
+              <h1>SeaDex Mirror</h1>
+              <p class="about-lead">
+                This is a backup mirror of releases.moe in case the original site is down, slow, or temporarily unavailable. The goal is to keep the public data readable and easy to access, not to replace the upstream project.
+              </p>
+              <div class="about-pill-row">
+                <span class="about-pill">Backup mirror</span>
+                <span class="about-pill">Fast access</span>
+                <span class="about-pill">No trackers</span>
+                <span class="about-pill">Upstream links</span>
+              </div>
+            </div>
+
+            <div class="about-stats">
+              <div class="about-stat">
+                <span class="about-stat__label">Mirrored entries</span>
+                <strong>${status.counts.entries.toLocaleString()}</strong>
+              </div>
+              <div class="about-stat">
+                <span class="about-stat__label">Torrent rows</span>
+                <strong>${status.counts.torrents.toLocaleString()}</strong>
+              </div>
+              <div class="about-stat">
+                <span class="about-stat__label">Last rebuild</span>
+                <strong>${escapeHtml(rebuiltLabel)}</strong>
+              </div>
+            </div>
 
             <hr class="section-divider" />
 
             <div class="about-list">
-              <div>
-                <h2>What is different here</h2>
-                <p>Static snapshots instead of constant live reads, safer rebuild logic, cleaner mobile behavior, and room for mirror-specific UX improvements once parity is stable.</p>
+              <div class="about-block">
+                <h2>What this mirror is for</h2>
+                <p>Recently i faced issues with SeaDex website because Anilist api was down. So i made this mirror website. This mirror is here as a backup in case the original site is unavailable. It is meant to give you another way to read the same public SeaDex information when you need them.</p>
               </div>
-              <div>
+              <div class="about-block">
                 <h2>Who to credit</h2>
-                <p>SeaDex and releases.moe remain the source project. This mirror only republishes public-facing information with attribution.</p>
+                <p>SeaDex a.k.a releases.moe is the original source. The recommendations, notes, and torrent information come from them. This mirror only republishes public-facing data with proper credits. Again, kudos to them.</p>
               </div>
-              <div>
-                <h2>Where to find me</h2>
-                <div class="about-card__actions">
-                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">
-                    <span>${renderGithubIcon()}</span>
-                    <span>github.com/EithonX</span>
-                  </a>
+              <div class="about-block">
+                <h2>Maintainer</h2>
+                <div id="github-maintainer-shell">
+                  <p>Loading maintainer information...</p>
                 </div>
               </div>
-              <div>
+              <div class="about-block">
                 <h2>Upstream pages</h2>
+                <p>If you want the original site or its own About page, use the links below.</p>
                 <div class="about-card__actions">
                   <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_ABOUT_URL)}" target="_blank" rel="noreferrer">
                     <span>${renderExternalIcon()}</span>
@@ -713,6 +733,42 @@ function renderAbout(status: MirrorStatus) {
   );
 
   wireCommonUi(status, "about");
+
+  const maintainerShell = document.getElementById("github-maintainer-shell");
+  if (maintainerShell) {
+    fetch("https://api.github.com/users/EithonX")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch");
+        return res.json();
+      })
+      .then((data) => {
+        maintainerShell.innerHTML = `
+          <div class="github-profile-card">
+            <img class="github-profile-card__avatar" src="${escapeHtml(data.avatar_url)}" alt="Avatar" />
+            <div class="github-profile-card__info">
+              <strong>${escapeHtml(data.name || data.login)}</strong>
+              <p>${escapeHtml(data.bio || "Maintains this mirror.")}</p>
+              <div class="about-card__actions" style="margin-top: 0.75rem;">
+                <a class="comparison-link comparison-link--secondary" href="${escapeHtml(data.html_url)}" target="_blank" rel="noreferrer">
+                  <span>${renderGithubIcon()}</span>
+                  <span>${escapeHtml(data.login)}</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .catch(() => {
+        maintainerShell.innerHTML = `
+          <div class="about-card__actions">
+            <a class="comparison-link comparison-link--secondary" href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">
+              <span>${renderGithubIcon()}</span>
+              <span>github.com/EithonX</span>
+            </a>
+          </div>
+        `;
+      });
+  }
 }
 
 async function renderEntry(status: MirrorStatus, alId: number) {
