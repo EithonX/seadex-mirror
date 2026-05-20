@@ -1755,12 +1755,12 @@ function filterSheetItems(
 
 function formatSheetGroupLabel(groups: string[], count: number) {
   if (groups.length > 0) {
-    return groups.join(" / ");
+    return groups[0] ?? "";
   }
   if (count > 0) {
     return `${count} release${count === 1 ? "" : "s"}`;
   }
-  return "None";
+  return "";
 }
 
 function buildSeasonOptions(items: CatalogIndexItem[]) {
@@ -1824,22 +1824,22 @@ function readGroupSummary(item: CatalogItem): CatalogGroupSummary {
   if (bestGroups.length || altGroups.length || item.torrentCount === 0) {
     return {
       bestLabel: bestGroups.length
-        ? bestGroups.join(" / ")
+        ? (bestGroups[0] ?? "")
         : item.bestTorrentCount
           ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}`
-          : "None",
+          : "",
       altLabel: altGroups.length
-        ? altGroups.join(" / ")
+        ? (altGroups[0] ?? "")
         : item.torrentCount - item.bestTorrentCount > 0
           ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}`
-          : "None",
+          : "",
     };
   }
 
   return (
     groupSummaryCache.get(item.alId) ?? {
-      bestLabel: item.bestTorrentCount ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}` : "None",
-      altLabel: item.torrentCount - item.bestTorrentCount > 0 ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}` : "None",
+      bestLabel: item.bestTorrentCount ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}` : "",
+      altLabel: item.torrentCount - item.bestTorrentCount > 0 ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}` : "",
     }
   );
 }
@@ -1865,8 +1865,8 @@ async function ensureGroupSummary(alId: number) {
       const best = uniqueReleaseGroups(payload.torrents.filter((torrent) => torrent.isBest));
       const alt = uniqueReleaseGroups(payload.torrents.filter((torrent) => !torrent.isBest));
       groupSummaryCache.set(alId, {
-        bestLabel: best.length ? best.join(" / ") : "None",
-        altLabel: alt.length ? alt.join(" / ") : "None",
+        bestLabel: best[0] ?? "",
+        altLabel: alt[0] ?? "",
       });
     })
     .finally(() => {
