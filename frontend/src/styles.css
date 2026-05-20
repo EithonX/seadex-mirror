@@ -1299,6 +1299,35 @@ img {
   margin: 1.5rem 0;
 }
 
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  margin-bottom: 2rem;
+}
+
+.alert--danger {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.05);
+  color: var(--text);
+}
+
+.alert--danger svg {
+  color: rgb(239, 68, 68);
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 1.2rem;
+}
+
+.alert__content {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
 .section-divider {
   border: 0;
   border-top: 1px solid var(--line);
@@ -1472,7 +1501,6 @@ img {
   margin-top: auto;
 }
 
-/* dual column layout when private tracker is present */
 .torrent-card:has(.torrent-button--private) .torrent-card__actions {
   grid-template-columns: 1fr 1fr;
 }
@@ -1510,6 +1538,24 @@ img {
   object-fit: contain;
   flex: 0 0 auto;
   border-radius: 0.15rem;
+}
+
+.torrent-card-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.torrent-card-sizes span {
+  white-space: nowrap;
+}
+
+.torrent-button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 0.15rem;
 }
 
 .torrent-button--private,
@@ -2323,7 +2369,8 @@ body:has(.page--sheet) #app {
     font-size: 0.85rem;
   }
 
-  .torrent-grid {
+  .torrent-grid,
+  .entry-notes {
     grid-template-columns: 1fr;
   }
 
@@ -2332,13 +2379,34 @@ body:has(.page--sheet) #app {
   }
 
   .entry-hero__poster {
-    max-width: 260px;
+    width: 100%;
+    max-width: 290px;
     margin: 0 auto;
+  }
+
+  .entry-main {
+    max-width: 340px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .entry-hero h1 {
+    font-size: 1.85rem;
+  }
+
+  .entry-hero h2 {
+    font-size: 1.15rem;
   }
 
   .entry-hero__body {
     text-align: center;
     margin: 1.25rem auto 0;
+    width: 100%;
+  }
+  
+  .entry-meta-wrap {
+    max-width: 290px;
+    margin: 0 auto;
   }
 
   .entry-meta-row {
@@ -2347,6 +2415,12 @@ body:has(.page--sheet) #app {
     justify-content: space-between;
     gap: 0.5rem 1rem;
     padding-top: 0.5rem;
+    font-size: 1.05rem;
+  }
+
+  .entry-meta-row svg {
+    width: 1.15rem;
+    height: 1.15rem;
   }
 
   .relation-list {

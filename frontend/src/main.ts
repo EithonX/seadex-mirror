@@ -733,6 +733,16 @@ async function renderEntry(status: MirrorStatus, alId: number) {
     "entry",
     `
       <main class="page page--entry">
+        ${
+          entry.incomplete
+            ? `
+            <div class="alert alert--danger">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-triangle-alert"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+              <div class="alert__content">This entry is marked as incomplete.</div>
+            </div>
+          `
+            : ""
+        }
         <div class="entry-layout">
           <aside class="entry-sidebar">
             <section class="entry-hero">
@@ -1020,59 +1030,50 @@ function renderTorrentCards(torrents: EntryPayload["torrents"]): string {
     return "";
   }
 
-  // Group torrents by releaseGroup and formatted size to avoid merging different releases (e.g. 1080p and 720p) from the same group
+  // Group torrents by releaseGroup to correctly merge different variants of the same release (like upstream does)
   const groups: { [key: string]: { groupName: string; torrents: EntryPayload["torrents"] } } = {};
   for (const t of torrents) {
     const groupName = (t.releaseGroup || "Unknown group").trim();
-    const sizeNum = t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
-    const formattedSize = formatBytes(sizeNum);
     
-    const groupKey = `${groupName}|${formattedSize}`;
-    if (!groups[groupKey]) {
-      groups[groupKey] = { groupName, torrents: [] };
+    if (!groups[groupName]) {
+      groups[groupName] = { groupName, torrents: [] };
     }
-    groups[groupKey].torrents.push(t);
+    groups[groupName].torrents.push(t);
   }
 
   return Object.values(groups)
     .map(({ groupName, torrents: groupList }) => {
-      // 1. Calculate total sizes and find unique formatted sizes
-      const sizes = groupList
-        .map((t) => t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0))
-        .filter((s) => s > 0);
-      const uniqueSizes = [...new Set(sizes.map((s) => formatBytes(s)))];
-      const sizeLabel = uniqueSizes.length > 0 ? `<span>${uniqueSizes.join(" / ")}</span>` : "";
-
-      // 2. Calculate file counts and find unique file counts
-      const uniqueFileCounts = [...new Set(groupList.map((t) => t.files.length))];
-      const fileLabel = `<span>${uniqueFileCounts.map((c) => `${c} file${c === 1 ? "" : "s"}`).join(" / ")}</span>`;
-
-      // 3. Badges: Best if any isBest, Dual Audio if any is dualAudio, unique tags (up to 4)
+      // Badges: Best if any isBest, Dual Audio if any is dualAudio, unique tags (up to 4)
       const isBest = groupList.some((t) => t.isBest);
       const dualAudio = groupList.some((t) => t.dualAudio);
       const tags = [...new Set(groupList.flatMap((t) => t.tags))].slice(0, 4);
 
-      // 4. Combine links/actions
-      let publicUrl: string | null = null;
-      let publicLabel = "Public";
-      let hasPrivate = false;
+      // Extract unique sizes for the header
+      const uniqueSizes = [...new Set(groupList.map(t => {
+          const sizeNum = t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
+          return formatBytes(sizeNum);
+      }))];
+      const sizesHtml = uniqueSizes.length > 0 ? `<p class="torrent-card-sizes">${uniqueSizes.map(s => `<span>${s}</span>`).join("")}</p>` : "";
 
-      for (const t of groupList) {
-        const links = classifyTorrentLinks(t);
-        if (links.publicUrl && !publicUrl) {
-          publicUrl = links.publicUrl;
-          publicLabel = links.publicLabel;
-        }
-        if (links.hasPrivate) {
-          hasPrivate = true;
-        }
-      }
+      // 4. Generate simple action buttons for each variant
+      const actionButtons = groupList
+        .map((t) => {
+          const links = classifyTorrentLinks(t);
+          if (links.publicUrl) {
+            return `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(links.publicLabel)} ${escapeHtml(links.publicLabel)}</a>`;
+          }
+          if (links.hasPrivate) {
+            return `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`;
+          }
+          return `<span class="torrent-button torrent-button--muted">No link</span>`;
+        })
+        .join("");
 
       return `
         <article class="torrent-card">
           <div class="torrent-card__header">
             <h3>${escapeHtml(groupName)}</h3>
-            <p>${sizeLabel}${fileLabel}</p>
+            ${sizesHtml}
           </div>
 
           <div class="torrent-card__badges">
@@ -1082,16 +1083,7 @@ function renderTorrentCards(torrents: EntryPayload["torrents"]): string {
           </div>
 
           <div class="torrent-card__actions">
-            ${
-              publicUrl
-                ? `<a class="torrent-button" href="${escapeHtml(publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(publicLabel)} ${escapeHtml(publicLabel)}</a>`
-                : `<span class="torrent-button torrent-button--muted">No public link</span>`
-            }
-            ${
-              hasPrivate
-                ? `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`
-                : ""
-            }
+            ${actionButtons}
           </div>
         </article>
       `;
