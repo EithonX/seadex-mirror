@@ -29,8 +29,8 @@ jobs:
       ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
-      MIRROR_STATUS_URL: ${{ format('https://{0}.pages.dev/mirror-data/status.json', vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
+      MIRROR_STATUS_URL: ${{ format('https://{0}.pages.dev/mirror-data/status.json', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -66,16 +66,7 @@ jobs:
 
       - name: Verify Cloudflare Pages access
         if: steps.mirror.outputs.skipped != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          status_code="$(
-            curl --silent --show-error --output /tmp/cloudflare-pages-project.json --write-out "%{http_code}" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT_NAME" \
-            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            --header "Content-Type: application/json" \
-          )"
-          node -e "const fs=require('fs'); const statusCode=process.argv[1]; const payload=JSON.parse(fs.readFileSync('/tmp/cloudflare-pages-project.json','utf8')); if (statusCode !== '200' || !payload.success) { console.error('Cloudflare Pages access check failed.'); console.error('HTTP status:', statusCode); console.error(JSON.stringify(payload.errors ?? payload, null, 2)); process.exit(1); } console.log('Verified Cloudflare Pages project access.');" "$status_code"
+        run: node scripts/verify-cloudflare.mjs
 
       - name: Deploy Pages site
         if: steps.mirror.outputs.skipped != 'true'
