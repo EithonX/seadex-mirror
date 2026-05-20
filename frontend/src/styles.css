@@ -849,6 +849,16 @@ img {
   color: var(--tag-text);
 }
 
+.pill--audio {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+}
+
+:root[data-theme="light"] .pill--audio {
+  background: rgba(59, 130, 246, 0.14);
+  color: #1d4ed8;
+}
+
 .pill--warn {
   background: var(--warn-bg);
   color: var(--warn-text);
@@ -1566,6 +1576,61 @@ img {
 .torrent-button:focus-visible {
   outline: 2px solid #3b82f6;
   outline-offset: 0.15rem;
+}
+
+.torrent-menu {
+  position: relative;
+}
+
+.torrent-menu__summary {
+  list-style: none;
+  cursor: pointer;
+  width: 100%;
+}
+
+.torrent-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
+.torrent-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  min-width: 100%;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.torrent-menu__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: calc(var(--radius-sm) - 0.15rem);
+  border: 1px solid transparent;
+  color: var(--text);
+  background: var(--panel);
+  font-size: 0.77rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.torrent-menu__item:hover {
+  background: var(--panel-soft);
+  border-color: var(--line);
+}
+
+.torrent-menu__item--private,
+.torrent-menu__item--muted {
+  cursor: not-allowed;
+  color: var(--muted);
 }
 
 .torrent-button--private,

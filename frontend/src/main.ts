@@ -1101,7 +1101,7 @@ function renderTorrentCard(groupName: string, torrents: EntryPayload["torrents"]
 
       <div class="torrent-card__badges">
         <span class="pill ${summary.isBest ? "pill--best" : "pill--alt"}">${summary.isBest ? "Best" : "Alt"}</span>
-        ${summary.dualAudio ? `<span class="pill pill--tag">Dual Audio</span>` : ""}
+        ${summary.dualAudio ? `<span class="pill pill--audio">Dual Audio</span>` : ""}
         ${summary.tags.map((tag) => `<span class="pill pill--tag">${escapeHtml(tag)}</span>`).join("")}
       </div>
 
@@ -1132,37 +1132,150 @@ function renderTorrentActionGroups(torrents: EntryPayload["torrents"]): string {
 }
 
 function renderTrackerTorrentActions(tracker: string, torrents: EntryPayload["torrents"]): string {
-  const [firstTorrent] = torrents;
-  if (!firstTorrent) {
+  const actions = collectTrackerActions(tracker, torrents);
+  if (actions.length === 0) {
     return "";
   }
 
-  if (torrents.length === 1 || firstTorrent.groupedUrl || firstTorrent.sourceGroupedUrl) {
-    return renderTorrentActionButton(firstTorrent, tracker, true);
+  if (actions.length === 1) {
+    return renderTrackerAction(actions[0]);
   }
 
-  return torrents
-    .map((torrent, index) => renderTorrentActionButton(torrent, `${tracker} #${index + 1}`))
-    .join("");
+  return renderTrackerActionMenu(tracker, actions);
 }
 
-function renderTorrentActionButton(
-  torrent: EntryPayload["torrents"][number],
-  label: string,
-  preferGrouped = false,
+function collectTrackerActions(tracker: string, torrents: EntryPayload["torrents"]) {
+  const publicActions = new Map<
+    string,
+    {
+      buttonLabel: string;
+      menuLabel: string;
+      href: string | null;
+      tracker: string;
+      isPrivate: boolean;
+    }
+  >();
+  let hasPrivate = false;
+
+  for (const [index, torrent] of torrents.entries()) {
+    const links = classifyTorrentLinks(torrent, true);
+    if (links.publicUrl) {
+      publicActions.set(links.publicUrl, {
+        buttonLabel: tracker || "Other",
+        menuLabel: describeTorrentAction(torrent, index),
+        href: links.publicUrl,
+        tracker,
+        isPrivate: false,
+      });
+    }
+
+    if (links.hasPrivate) {
+      hasPrivate = true;
+    }
+  }
+
+  if (publicActions.size > 0) {
+    return [...publicActions.values()];
+  }
+
+  if (hasPrivate) {
+    return [
+      {
+        buttonLabel: "Private Tracker",
+        menuLabel: "Private Tracker",
+        href: null,
+        tracker,
+        isPrivate: true,
+      },
+    ];
+  }
+
+  return [
+    {
+      buttonLabel: tracker || "Other",
+      menuLabel: tracker || "Other",
+      href: null,
+      tracker,
+      isPrivate: false,
+    },
+  ];
+}
+
+function renderTrackerAction(action: {
+  buttonLabel: string;
+  menuLabel: string;
+  href: string | null;
+  tracker: string;
+  isPrivate: boolean;
+}): string {
+  const label = escapeHtml(action.buttonLabel);
+
+  if (action.href) {
+    return `<a class="torrent-button" href="${escapeHtml(action.href)}" target="_blank" rel="noreferrer">${renderTrackerIcon(action.tracker || action.buttonLabel)} ${label}</a>`;
+  }
+
+  if (action.isPrivate) {
+    return `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} ${label}</span>`;
+  }
+
+  return `<span class="torrent-button torrent-button--muted">${label}</span>`;
+}
+
+function renderTrackerActionMenu(
+  tracker: string,
+  actions: { buttonLabel: string; menuLabel: string; href: string | null; tracker: string; isPrivate: boolean }[],
 ): string {
-  const links = classifyTorrentLinks(torrent, preferGrouped);
-  const trackerLabel = escapeHtml(label);
-
-  if (links.publicUrl) {
-    return `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(torrent.tracker || label)} ${trackerLabel}</a>`;
+  const firstAction = actions[0];
+  if (!firstAction) {
+    return "";
   }
 
-  if (links.hasPrivate) {
-    return `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} ${escapeHtml(formatPrivateTrackerLabel(label))}</span>`;
+  const summaryLabel = firstAction.isPrivate ? "Private Tracker" : tracker || "Other";
+  const summaryIcon = firstAction.isPrivate
+    ? renderPrivateTrackerIcon()
+    : renderTrackerIcon(firstAction.tracker || summaryLabel);
+
+  return `
+    <details class="torrent-menu">
+      <summary class="torrent-button torrent-menu__summary">${summaryIcon} ${escapeHtml(summaryLabel)}</summary>
+      <div class="torrent-menu__panel">
+        ${actions.map((action) => renderTrackerActionMenuItem(action)).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderTrackerActionMenuItem(action: {
+  buttonLabel: string;
+  menuLabel: string;
+  href: string | null;
+  tracker: string;
+  isPrivate: boolean;
+}) {
+  const label = escapeHtml(action.menuLabel);
+
+  if (action.href) {
+    return `<a class="torrent-menu__item" href="${escapeHtml(action.href)}" target="_blank" rel="noreferrer">${label}</a>`;
   }
 
-  return `<span class="torrent-button torrent-button--muted">${trackerLabel}</span>`;
+  if (action.isPrivate) {
+    return `<span class="torrent-menu__item torrent-menu__item--private">${label}</span>`;
+  }
+
+  return `<span class="torrent-menu__item torrent-menu__item--muted">${label}</span>`;
+}
+
+function describeTorrentAction(torrent: EntryPayload["torrents"][number], index: number) {
+  const totalSize = torrent.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
+  const fileCount = torrent.files.length;
+
+  if (fileCount === 0 && totalSize <= 0) {
+    return `Torrent ${index + 1}`;
+  }
+
+  const sizeLabel = totalSize > 0 ? formatBytes(totalSize) : "Unknown size";
+  const fileLabel = fileCount === 1 ? "1 file" : `${fileCount} files`;
+  return `${fileLabel} - ${sizeLabel}`;
 }
 
 function summarizeTorrentCard(torrents: EntryPayload["torrents"]) {
@@ -1790,11 +1903,6 @@ function isPrivateTrackerUrl(url: string) {
 function isPrivateTrackerName(tracker: string | null | undefined) {
   const normalized = (tracker ?? "").trim();
   return normalized === "AB" || normalized === "OtherPrivate";
-}
-
-function formatPrivateTrackerLabel(label: string) {
-  const suffix = label.match(/\s+#\d+$/)?.[0] ?? "";
-  return `Private Tracker${suffix}`;
 }
 
 function sortTorrentsLikeUpstream(torrents: EntryPayload["torrents"]) {
