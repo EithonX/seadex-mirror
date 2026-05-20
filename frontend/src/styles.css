@@ -1263,6 +1263,13 @@ img {
   line-height: 1.4;
 }
 
+.entry-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
 .entry-meta-wrap {
   display: block;
   width: 100%;
@@ -2402,6 +2409,10 @@ body:has(.page--sheet) #app {
     text-align: center;
     margin: 1.25rem auto 0;
     width: 100%;
+  }
+
+  .entry-genres {
+    justify-content: center;
   }
   
   .entry-meta-wrap {

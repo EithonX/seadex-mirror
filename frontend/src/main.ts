@@ -760,10 +760,23 @@ async function renderEntry(status: MirrorStatus, alId: number) {
                     ? `<h2>${escapeHtml(entry.titles.userPreferred)}</h2>`
                     : ""
                 }
+                ${
+                  entry.genres && entry.genres.length > 0
+                    ? `
+                    <div class="entry-genres">
+                      ${entry.genres.slice(0, 4).map(g => `<span class="pill pill--tag">${escapeHtml(g)}</span>`).join("")}
+                    </div>
+                  `
+                    : ""
+                }
                 <div class="entry-meta-wrap">
                   <div class="entry-meta-row">
-                    <span>${renderCalendarIcon()} ${entry.startYear ?? "Unknown"}</span>
+                    <span>${renderCalendarIcon()} ${entry.season ? escapeHtml(capitalize(entry.season)) + " " : ""}${entry.seasonYear ?? entry.startYear ?? "Unknown"}</span>
                     <span>${escapeHtml(formatSeriesLabel(entry))} ${renderFormatIcon()}</span>
+                  </div>
+                  <div class="entry-meta-row">
+                    <span title="Average Score"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-star"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> ${entry.averageScore ? `${entry.averageScore}%` : "No score"}</span>
+                    <span title="Status">${entry.status ? escapeHtml(capitalize(entry.status.toLowerCase())) : "Unknown"} <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
                   </div>
                   <div class="entry-meta-row">
                     <span title="Created on">${renderCalendarPlusIcon()} ${formatDate(entry.sourceCreatedAt)}</span>
