@@ -20,6 +20,8 @@ const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
 const UPSTREAM_SHEET_EMBED_URL =
   "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/htmlview";
 const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
+const DEVELOPER_GITHUB_USERNAME = "EithonX";
+const DEVELOPER_GITHUB_AVATAR_URL = "https://github.com/EithonX.png";
 const UPSTREAM_TRACKER_ORDER = [
   "Nyaa",
   "AB",
@@ -707,7 +709,12 @@ function renderAbout(status: MirrorStatus) {
               <div class="about-block">
                 <h2>Maintainer</h2>
                 <div id="github-maintainer-shell">
-                  <p>Loading maintainer information...</p>
+                  ${renderMaintainerProfileCard({
+                    avatarUrl: DEVELOPER_GITHUB_AVATAR_URL,
+                    username: DEVELOPER_GITHUB_USERNAME,
+                    bio: "Keeps this mirror online and updated.",
+                    profileUrl: DEVELOPER_GITHUB_URL,
+                  })}
                 </div>
               </div>
               <div class="about-block">
@@ -736,39 +743,53 @@ function renderAbout(status: MirrorStatus) {
 
   const maintainerShell = document.getElementById("github-maintainer-shell");
   if (maintainerShell) {
-    fetch("https://api.github.com/users/EithonX")
+    fetch(`https://api.github.com/users/${encodeURIComponent(DEVELOPER_GITHUB_USERNAME)}`)
       .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch");
+        if (!res.ok) {
+          throw new Error(`GitHub profile fetch failed with ${res.status}`);
+        }
         return res.json();
       })
       .then((data) => {
-        maintainerShell.innerHTML = `
-          <div class="github-profile-card">
-            <img class="github-profile-card__avatar" src="${escapeHtml(data.avatar_url)}" alt="Avatar" />
-            <div class="github-profile-card__info">
-              <strong>${escapeHtml(data.name || data.login)}</strong>
-              <p>${escapeHtml(data.bio || "Maintains this mirror.")}</p>
-              <div class="about-card__actions" style="margin-top: 0.75rem;">
-                <a class="comparison-link comparison-link--secondary" href="${escapeHtml(data.html_url)}" target="_blank" rel="noreferrer">
-                  <span>${renderGithubIcon()}</span>
-                  <span>${escapeHtml(data.login)}</span>
-                </a>
-              </div>
-            </div>
-          </div>
-        `;
+        maintainerShell.innerHTML = renderMaintainerProfileCard({
+          avatarUrl: typeof data.avatar_url === "string" && data.avatar_url ? data.avatar_url : DEVELOPER_GITHUB_AVATAR_URL,
+          username: typeof data.login === "string" && data.login ? data.login : DEVELOPER_GITHUB_USERNAME,
+          bio: typeof data.bio === "string" && data.bio.trim() ? data.bio.trim() : "Keeps this mirror online and updated.",
+          profileUrl: typeof data.html_url === "string" && data.html_url ? data.html_url : DEVELOPER_GITHUB_URL,
+        });
       })
       .catch(() => {
-        maintainerShell.innerHTML = `
-          <div class="about-card__actions">
-            <a class="comparison-link comparison-link--secondary" href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">
-              <span>${renderGithubIcon()}</span>
-              <span>github.com/EithonX</span>
-            </a>
-          </div>
-        `;
+        maintainerShell.innerHTML = renderMaintainerProfileCard({
+          avatarUrl: DEVELOPER_GITHUB_AVATAR_URL,
+          username: DEVELOPER_GITHUB_USERNAME,
+          bio: "Keeps this mirror online and updated.",
+          profileUrl: DEVELOPER_GITHUB_URL,
+        });
       });
   }
+}
+
+function renderMaintainerProfileCard(input: {
+  avatarUrl: string;
+  username: string;
+  bio: string;
+  profileUrl: string;
+}) {
+  return `
+    <div class="github-profile-card">
+      <div class="github-profile-card__main">
+        <img class="github-profile-card__avatar" src="${escapeHtml(input.avatarUrl)}" alt="${escapeHtml(input.username)} avatar" />
+        <div class="github-profile-card__info">
+          <strong>@${escapeHtml(input.username)}</strong>
+          <p>${escapeHtml(input.bio)}</p>
+        </div>
+      </div>
+      <a class="github-profile-card__footer" href="${escapeHtml(input.profileUrl)}" target="_blank" rel="noreferrer">
+        <span class="github-profile-card__footer-icon">${renderGithubIcon()}</span>
+        <span class="github-profile-card__footer-text">github.com/${escapeHtml(input.username)}</span>
+      </a>
+    </div>
+  `;
 }
 
 async function renderEntry(status: MirrorStatus, alId: number) {
