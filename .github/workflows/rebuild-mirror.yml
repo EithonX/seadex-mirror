@@ -2,16 +2,32 @@ name: Rebuild mirror
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Force a full upstream rebuild even if the probe signature matches
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "17 */12 * * *"
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: rebuild-mirror-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rebuild:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       ANILIST_ACCESS_TOKEN: ${{ secrets.ANILIST_ACCESS_TOKEN }}
       ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
       ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
       MIRROR_STATUS_URL: ${{ format('https://{0}.pages.dev/mirror-data/status.json', vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
@@ -30,10 +46,29 @@ jobs:
         run: npm run typecheck
 
       - name: Build static mirror data
-        run: npm run data:build
+        id: mirror
+        shell: bash
+        env:
+          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCE_REBUILD" = "true" ]; then
+            node scripts/build-static-data.mjs --force=true --report .mirror-build-report.json
+          else
+            node scripts/build-static-data.mjs --report .mirror-build-report.json
+          fi
+          skipped="$(node -e "const fs=require('fs'); const report=JSON.parse(fs.readFileSync('.mirror-build-report.json','utf8')); process.stdout.write(String(Boolean(report.skipped)));")"
+          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
 
       - name: Build frontend
+        if: steps.mirror.outputs.skipped != 'true'
         run: npm run build
 
       - name: Deploy Pages site
-        run: npx wrangler pages deploy dist --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME"
+        if: steps.mirror.outputs.skipped != 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT_NAME }}

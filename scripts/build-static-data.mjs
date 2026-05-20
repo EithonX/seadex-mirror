@@ -1,5 +1,5 @@
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
@@ -84,6 +84,7 @@ async function main() {
   const anilistClientSecret = args.anilistClientSecret ?? process.env.ANILIST_CLIENT_SECRET ?? "";
   const statusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
+  const reportPath = args.report ? resolve(args.report) : "";
   const force = args.force === "true";
 
   warnAniListCredentialMode(anilistAccessToken, anilistClientId, anilistClientSecret);
@@ -100,23 +101,19 @@ async function main() {
   logStep(`Computed upstream probe signature from ${sourceProbe.items.length} rows.`);
 
   if (!force && shouldSkipRebuild(existingSnapshot, probeSignature)) {
-    console.log(
-      JSON.stringify(
-        {
-          mode: "static-snapshot",
-          skipped: true,
-          reason: "upstream-unchanged",
-          sourceBaseUrl,
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          probeSignature,
-          entries: existingSnapshot?.status?.counts?.entries ?? null,
-          torrents: existingSnapshot?.status?.counts?.torrents ?? null,
-        },
-        null,
-        2,
-      ),
-    );
+    const report = {
+      mode: "static-snapshot",
+      skipped: true,
+      reason: "upstream-unchanged",
+      sourceBaseUrl,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      probeSignature,
+      entries: existingSnapshot?.status?.counts?.entries ?? null,
+      torrents: existingSnapshot?.status?.counts?.torrents ?? null,
+    };
+    await writeOptionalReport(reportPath, report);
+    console.log(JSON.stringify(report, null, 2));
     return;
   }
 
@@ -158,23 +155,20 @@ async function main() {
   await writeSnapshot(outputDir, snapshot);
   logStep("Snapshot files written successfully.");
 
-  console.log(
-    JSON.stringify(
-      {
-        mode: "static-snapshot",
-        sourceBaseUrl,
-        startedAt,
-        finishedAt,
-        outputDir,
-        entries: snapshot.catalog.items.length,
-        entryFiles: snapshot.catalog.items.length,
-        torrents: snapshot.status.counts.torrents,
-        anilistMedia: snapshot.status.counts.anilistMedia,
-      },
-      null,
-      2,
-    ),
-  );
+  const report = {
+    mode: "static-snapshot",
+    skipped: false,
+    sourceBaseUrl,
+    startedAt,
+    finishedAt,
+    outputDir,
+    entries: snapshot.catalog.items.length,
+    entryFiles: snapshot.catalog.items.length,
+    torrents: snapshot.status.counts.torrents,
+    anilistMedia: snapshot.status.counts.anilistMedia,
+  };
+  await writeOptionalReport(reportPath, report);
+  console.log(JSON.stringify(report, null, 2));
 }
 
 async function loadExistingSnapshot(outputDir, statusUrl) {
@@ -297,6 +291,15 @@ async function writeSnapshot(outputDir, snapshot) {
       logStep(`Wrote ${written}/${total} entry files...`);
     }
   }
+}
+
+async function writeOptionalReport(reportPath, payload) {
+  if (!reportPath) {
+    return;
+  }
+
+  await mkdir(dirname(reportPath), { recursive: true });
+  await writeJson(reportPath, payload);
 }
 
 async function writeJson(filePath, payload) {

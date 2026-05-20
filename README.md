@@ -78,12 +78,25 @@ The recommended automation path is the GitHub Actions workflow in `.github/workf
 
 Required GitHub secrets:
 
+- `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN`
 
 Optional repository variables:
 
 - `CLOUDFLARE_PAGES_PROJECT_NAME`
   Default expected project name: `seadex`
+
+Optional GitHub secrets:
+
+- `ANILIST_ACCESS_TOKEN`
+  Recommended if you want authenticated AniList GraphQL access during snapshot builds.
+
+Workflow split:
+
+- `.github/workflows/rebuild-mirror.yml`
+  Scheduled every 12 hours and manually runnable. Rebuilds `frontend/public/mirror-data`, skips deploy automatically when upstream has not changed, and supports a manual `force` input.
+- `.github/workflows/deploy-site.yml`
+  Runs on `main` pushes that touch app/workflow/build files, then builds and deploys the site using the checked-in snapshot data.
 
 ## Frontend goals
 
