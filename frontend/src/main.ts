@@ -20,6 +20,36 @@ const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
 const UPSTREAM_SHEET_EMBED_URL =
   "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/htmlview";
 const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
+const UPSTREAM_TRACKER_ORDER = [
+  "Nyaa",
+  "AB",
+  "AniDex",
+  "RuTracker",
+  "AnimeTosho",
+  "BeyondHD",
+  "Aither",
+  "Blutopia",
+  "HDBits",
+  "BroadcastTheNet",
+  "PassThePopcorn",
+  "Other",
+  "OtherPrivate",
+] as const;
+const TRACKER_ICON_MAP: Record<string, string> = {
+  AB: "/lock.ico",
+  AniDex: "/anidex.ico",
+  AnimeTosho: "/tosho.ico",
+  Nyaa: "/cat.png",
+  RuTracker: "/rutracker.ico",
+  BeyondHD: "/bhd.ico",
+  Aither: "/aith.ico",
+  Blutopia: "/blu.ico",
+  HDBits: "/hdb.png",
+  BroadcastTheNet: "/btn.ico",
+  PassThePopcorn: "/ptp.ico",
+  Other: "/favicon.png",
+  OtherPrivate: "/favicon.png",
+};
 
 type RouteContext =
   | { kind: "index" }
@@ -1043,65 +1073,158 @@ function renderTorrentCards(torrents: EntryPayload["torrents"]): string {
     return "";
   }
 
-  // Group torrents by releaseGroup to correctly merge different variants of the same release (like upstream does)
-  const groups: { [key: string]: { groupName: string; torrents: EntryPayload["torrents"] } } = {};
-  for (const t of torrents) {
-    const groupName = (t.releaseGroup || "Unknown group").trim();
-    
-    if (!groups[groupName]) {
-      groups[groupName] = { groupName, torrents: [] };
+  const groups = groupTorrentsLikeUpstream(torrents);
+  const bestCards = groups
+    .filter((group) => group.best.length > 0)
+    .map((group) => renderTorrentCard(group.releaseGroupLabel, group.best))
+    .join("");
+  const altCards = groups
+    .filter((group) => group.alt.length > 0)
+    .map((group) => renderTorrentCard(group.releaseGroupLabel, group.alt))
+    .join("");
+
+  return bestCards + altCards;
+}
+
+function renderTorrentCard(groupName: string, torrents: EntryPayload["torrents"]): string {
+  const summary = summarizeTorrentCard(torrents);
+  const sizesHtml = summary.sizes.length
+    ? `<p class="torrent-card-sizes">${summary.sizes.map((size) => `<span>${escapeHtml(size)}</span>`).join("")}</p>`
+    : "";
+
+  return `
+    <article class="torrent-card">
+      <div class="torrent-card__header">
+        <h3>${escapeHtml(groupName)}</h3>
+        ${sizesHtml}
+      </div>
+
+      <div class="torrent-card__badges">
+        <span class="pill ${summary.isBest ? "pill--best" : "pill--alt"}">${summary.isBest ? "Best" : "Alt"}</span>
+        ${summary.dualAudio ? `<span class="pill pill--tag">Dual Audio</span>` : ""}
+        ${summary.tags.map((tag) => `<span class="pill pill--tag">${escapeHtml(tag)}</span>`).join("")}
+      </div>
+
+      <div class="torrent-card__actions">
+        ${renderTorrentActionGroups(torrents)}
+      </div>
+    </article>
+  `;
+}
+
+function renderTorrentActionGroups(torrents: EntryPayload["torrents"]): string {
+  const groupedByTracker = new Map<string, EntryPayload["torrents"]>();
+
+  for (const torrent of torrents) {
+    const tracker = torrent.tracker || "Other";
+    const trackerGroup = groupedByTracker.get(tracker);
+    if (trackerGroup) {
+      trackerGroup.push(torrent);
+      continue;
     }
-    groups[groupName].torrents.push(t);
+
+    groupedByTracker.set(tracker, [torrent]);
   }
 
-  return Object.values(groups)
-    .map(({ groupName, torrents: groupList }) => {
-      // Badges: Best if any isBest, Dual Audio if any is dualAudio, unique tags (up to 4)
-      const isBest = groupList.some((t) => t.isBest);
-      const dualAudio = groupList.some((t) => t.dualAudio);
-      const tags = [...new Set(groupList.flatMap((t) => t.tags))].slice(0, 4);
-
-      // Extract unique sizes for the header
-      const uniqueSizes = [...new Set(groupList.map(t => {
-          const sizeNum = t.files.reduce((sum, file) => sum + (Number.isFinite(file.length) ? file.length : 0), 0);
-          return formatBytes(sizeNum);
-      }))];
-      const sizesHtml = uniqueSizes.length > 0 ? `<p class="torrent-card-sizes">${uniqueSizes.map(s => `<span>${s}</span>`).join("")}</p>` : "";
-
-      // 4. Generate simple action buttons for each variant
-      const actionButtons = groupList
-        .map((t) => {
-          const links = classifyTorrentLinks(t);
-          if (links.publicUrl) {
-            return `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(links.publicLabel)} ${escapeHtml(links.publicLabel)}</a>`;
-          }
-          if (links.hasPrivate) {
-            return `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} Private Tracker</span>`;
-          }
-          return `<span class="torrent-button torrent-button--muted">No link</span>`;
-        })
-        .join("");
-
-      return `
-        <article class="torrent-card">
-          <div class="torrent-card__header">
-            <h3>${escapeHtml(groupName)}</h3>
-            ${sizesHtml}
-          </div>
-
-          <div class="torrent-card__badges">
-            <span class="pill ${isBest ? "pill--best" : "pill--alt"}">${isBest ? "Best" : "Alt"}</span>
-            ${dualAudio ? `<span class="pill pill--tag">Dual Audio</span>` : ""}
-            ${tags.map((tag) => `<span class="pill pill--tag">${escapeHtml(tag)}</span>`).join("")}
-          </div>
-
-          <div class="torrent-card__actions">
-            ${actionButtons}
-          </div>
-        </article>
-      `;
-    })
+  return [...groupedByTracker.entries()]
+    .map(([tracker, trackerTorrents]) => renderTrackerTorrentActions(tracker, trackerTorrents))
     .join("");
+}
+
+function renderTrackerTorrentActions(tracker: string, torrents: EntryPayload["torrents"]): string {
+  const [firstTorrent] = torrents;
+  if (!firstTorrent) {
+    return "";
+  }
+
+  if (torrents.length === 1 || firstTorrent.groupedUrl || firstTorrent.sourceGroupedUrl) {
+    return renderTorrentActionButton(firstTorrent, tracker, true);
+  }
+
+  return torrents
+    .map((torrent, index) => renderTorrentActionButton(torrent, `${tracker} #${index + 1}`))
+    .join("");
+}
+
+function renderTorrentActionButton(
+  torrent: EntryPayload["torrents"][number],
+  label: string,
+  preferGrouped = false,
+): string {
+  const links = classifyTorrentLinks(torrent, preferGrouped);
+  const trackerLabel = escapeHtml(label);
+
+  if (links.publicUrl) {
+    return `<a class="torrent-button" href="${escapeHtml(links.publicUrl)}" target="_blank" rel="noreferrer">${renderTrackerIcon(torrent.tracker || label)} ${trackerLabel}</a>`;
+  }
+
+  if (links.hasPrivate) {
+    return `<span class="torrent-button torrent-button--private" aria-disabled="true">${renderPrivateTrackerIcon()} ${escapeHtml(formatPrivateTrackerLabel(label))}</span>`;
+  }
+
+  return `<span class="torrent-button torrent-button--muted">${trackerLabel}</span>`;
+}
+
+function summarizeTorrentCard(torrents: EntryPayload["torrents"]) {
+  let isBest = false;
+  let dualAudio = false;
+  const tags = new Set<string>();
+  const trackerSizes = new Map<string, number>();
+
+  for (const torrent of torrents) {
+    if (torrent.isBest) {
+      isBest = true;
+    }
+    if (torrent.dualAudio) {
+      dualAudio = true;
+    }
+    for (const tag of torrent.tags) {
+      tags.add(tag);
+    }
+
+    const size = torrent.files.reduce(
+      (total, file) => total + (Number.isFinite(file.length) ? file.length : 0),
+      0,
+    );
+    if (size > 0) {
+      trackerSizes.set(torrent.tracker, (trackerSizes.get(torrent.tracker) ?? 0) + size);
+    }
+  }
+
+  return {
+    isBest,
+    dualAudio,
+    tags: [...tags].slice(0, 4),
+    sizes: [...trackerSizes.values()].map((size) => formatBytes(size)),
+  };
+}
+
+function groupTorrentsLikeUpstream(torrents: EntryPayload["torrents"]) {
+  const groups = new Map<
+    string,
+    {
+      releaseGroupLabel: string;
+      best: EntryPayload["torrents"];
+      alt: EntryPayload["torrents"];
+    }
+  >();
+
+  for (const torrent of sortTorrentsLikeUpstream(torrents)) {
+    const releaseGroupKey = (torrent.releaseGroup || "").trim();
+    const group = groups.get(releaseGroupKey);
+    if (group) {
+      (torrent.isBest ? group.best : group.alt).push(torrent);
+      continue;
+    }
+
+    groups.set(releaseGroupKey, {
+      releaseGroupLabel: releaseGroupKey || "Unknown group",
+      best: torrent.isBest ? [torrent] : [],
+      alt: torrent.isBest ? [] : [torrent],
+    });
+  }
+
+  return [...groups.values()];
 }
 
 function renderRelationsSection(relations: EntryPayload["entry"]["relations"]) {
@@ -1637,23 +1760,71 @@ async function ensureGroupSummary(alId: number) {
 }
 
 function uniqueReleaseGroups(torrents: EntryPayload["torrents"]) {
-  return [...new Set(torrents.map((torrent) => torrent.releaseGroup).filter(Boolean))].slice(0, 2);
+  return [...new Set(sortTorrentsLikeUpstream(torrents).map((torrent) => torrent.releaseGroup).filter(Boolean))].slice(
+    0,
+    2,
+  );
 }
 
-function classifyTorrentLinks(torrent: EntryPayload["torrents"][number]) {
-  const candidates = [torrent.url, torrent.sourceUrl, torrent.groupedUrl, torrent.sourceGroupedUrl].filter(Boolean) as string[];
+function classifyTorrentLinks(torrent: EntryPayload["torrents"][number], preferGrouped = false) {
+  const candidates = (
+    preferGrouped
+      ? [torrent.groupedUrl, torrent.sourceGroupedUrl, torrent.url, torrent.sourceUrl]
+      : [torrent.url, torrent.sourceUrl, torrent.groupedUrl, torrent.sourceGroupedUrl]
+  ).filter(Boolean) as string[];
   const publicUrl = candidates.find((url) => !isPrivateTrackerUrl(url)) ?? null;
   const privateUrl = candidates.find((url) => isPrivateTrackerUrl(url)) ?? null;
+  const trackerIsPrivate = isPrivateTrackerName(torrent.tracker);
 
   return {
     publicUrl,
     publicLabel: publicUrl ? renderTrackerLabel(publicUrl) : "Public",
-    hasPrivate: Boolean(privateUrl || torrent.tracker.toUpperCase() === "AB"),
+    hasPrivate: Boolean(privateUrl || trackerIsPrivate),
   };
 }
 
 function isPrivateTrackerUrl(url: string) {
   return /\/torrents\.php\?/i.test(url) || /releases\.moe\/torrents\.php/i.test(url);
+}
+
+function isPrivateTrackerName(tracker: string | null | undefined) {
+  const normalized = (tracker ?? "").trim();
+  return normalized === "AB" || normalized === "OtherPrivate";
+}
+
+function formatPrivateTrackerLabel(label: string) {
+  const suffix = label.match(/\s+#\d+$/)?.[0] ?? "";
+  return `Private Tracker${suffix}`;
+}
+
+function sortTorrentsLikeUpstream(torrents: EntryPayload["torrents"]) {
+  return torrents.slice().sort(compareTorrentsLikeUpstream);
+}
+
+function compareTorrentsLikeUpstream(
+  left: EntryPayload["torrents"][number],
+  right: EntryPayload["torrents"][number],
+) {
+  return (
+    compareNumbers(right.isBest ? 1 : 0, left.isBest ? 1 : 0) ||
+    compareNumbers(left.dualAudio ? 1 : 0, right.dualAudio ? 1 : 0) ||
+    compareNumbers(trackerPriorityIndex(left.tracker), trackerPriorityIndex(right.tracker)) ||
+    compareStrings((left.releaseGroup ?? "").toLowerCase(), (right.releaseGroup ?? "").toLowerCase()) ||
+    compareStrings(left.id ?? "", right.id ?? "")
+  );
+}
+
+function trackerPriorityIndex(tracker: string) {
+  const index = UPSTREAM_TRACKER_ORDER.indexOf(tracker as (typeof UPSTREAM_TRACKER_ORDER)[number]);
+  return index === -1 ? UPSTREAM_TRACKER_ORDER.length : index;
+}
+
+function compareNumbers(left: number, right: number) {
+  return left - right;
+}
+
+function compareStrings(left: string, right: string) {
+  return left.localeCompare(right);
 }
 
 async function getCatalog() {
@@ -1849,18 +2020,17 @@ function formatDate(value: string | null) {
 }
 
 function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "Unknown size";
+  if (Number.isNaN(value) || !Number.isFinite(value)) {
+    return "0 B";
   }
 
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let amount = value;
-  let unitIndex = 0;
-  while (amount >= 1024 && unitIndex < units.length - 1) {
-    amount /= 1024;
-    unitIndex += 1;
+  if (value < 1) {
+    return `${value} B`;
   }
-  return `${amount.toFixed(amount >= 10 || unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+
+  const units = [" B", " KiB", " MiB", " GiB", " TiB"];
+  const unitIndex = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${Number((value / Math.pow(1024, unitIndex)).toFixed(2))}${units[unitIndex]}`;
 }
 
 function formatRelationType(value: string | null | undefined) {
@@ -1956,8 +2126,9 @@ function renderCloseIcon() {
 }
 
 function renderTrackerIcon(label: string) {
-  if (label === "Nyaa") {
-    return `<img src="/cat.png" alt="" class="tracker-icon" />`;
+  const iconPath = TRACKER_ICON_MAP[label];
+  if (iconPath) {
+    return `<img src="${iconPath}" alt="" class="tracker-icon" />`;
   }
 
   return renderExternalIcon();

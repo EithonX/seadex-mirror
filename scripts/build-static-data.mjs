@@ -10,6 +10,21 @@ const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 5;
 const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
 const PROGRESS_PREFIX = "[mirror-build]";
+const UPSTREAM_TRACKER_ORDER = [
+  "Nyaa",
+  "AB",
+  "AniDex",
+  "RuTracker",
+  "AnimeTosho",
+  "BeyondHD",
+  "Aither",
+  "Blutopia",
+  "HDBits",
+  "BroadcastTheNet",
+  "PassThePopcorn",
+  "Other",
+  "OtherPrivate",
+];
 
 const ANILIST_MEDIA_QUERY = `
   query($ids:[Int],$page:Int,$perPage:Int){
@@ -494,15 +509,30 @@ function buildSearchText(entry, media) {
 }
 
 function uniqueReleaseGroups(torrents) {
-  return [...new Set(torrents.map((torrent) => torrent?.releaseGroup ?? "").filter(Boolean))].slice(0, 2);
+  return [...new Set(sortTorrentsLikeUpstream(torrents).map((torrent) => torrent?.releaseGroup ?? "").filter(Boolean))].slice(0, 2);
 }
 
 function compareTorrentRows(left, right) {
+  return compareTorrentsLikeUpstream(left, right);
+}
+
+function sortTorrentsLikeUpstream(torrents) {
+  return torrents.slice().sort(compareTorrentsLikeUpstream);
+}
+
+function compareTorrentsLikeUpstream(left, right) {
   return (
     compareNumbers(right.isBest === true ? 1 : 0, left.isBest === true ? 1 : 0) ||
+    compareNumbers(left.dualAudio === true ? 1 : 0, right.dualAudio === true ? 1 : 0) ||
+    compareNumbers(trackerPriorityIndex(left.tracker ?? ""), trackerPriorityIndex(right.tracker ?? "")) ||
     compareStrings((left.releaseGroup ?? "").toLowerCase(), (right.releaseGroup ?? "").toLowerCase()) ||
     compareStrings(left.id ?? "", right.id ?? "")
   );
+}
+
+function trackerPriorityIndex(tracker) {
+  const index = UPSTREAM_TRACKER_ORDER.indexOf(tracker);
+  return index === -1 ? UPSTREAM_TRACKER_ORDER.length : index;
 }
 
 function compareNumbers(left, right) {

@@ -1246,33 +1246,36 @@ img {
   width: max-content;
   max-width: 100%;
   margin-top: 1.5rem;
+  gap: 0.22rem;
 }
 
 .entry-hero h1 {
-  font-size: 1.6rem;
+  margin: 0;
+  font-size: 1.45rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 1.25;
+  line-height: 1.15;
 }
 
 .entry-hero h2 {
-  margin-top: 0.35rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.94rem;
   font-weight: 500;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.25;
 }
 
 .entry-genres {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-top: 0.85rem;
+  margin-top: 0.7rem;
 }
 
 .entry-meta-wrap {
   display: block;
   width: 100%;
+  margin-top: 0.35rem;
 }
 
 .entry-meta-row {
@@ -2398,11 +2401,11 @@ body:has(.page--sheet) #app {
   }
 
   .entry-hero h1 {
-    font-size: 1.85rem;
+    font-size: 1.65rem;
   }
 
   .entry-hero h2 {
-    font-size: 1.15rem;
+    font-size: 1rem;
   }
 
   .entry-hero__body {
