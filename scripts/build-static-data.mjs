@@ -203,12 +203,37 @@ async function loadRemoteStatus(statusUrl) {
       return null;
     }
 
+    const status = await response.json();
+    const cacheUrl = new URL("anilist-cache.json", statusUrl).toString();
+
     return {
-      status: await response.json(),
-      aniListCache: new Map(),
+      status,
+      aniListCache: await loadRemoteAniListCache(cacheUrl),
     };
   } catch {
     return null;
+  }
+}
+
+async function loadRemoteAniListCache(cacheUrl) {
+  try {
+    const response = await fetch(cacheUrl, {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      return new Map();
+    }
+
+    const payload = await response.json();
+    return new Map(
+      Array.isArray(payload?.items)
+        ? payload.items
+            .filter((item) => Number.isInteger(item?.id) && item.id > 0)
+            .map((item) => [item.id, item])
+        : [],
+    );
+  } catch {
+    return new Map();
   }
 }
 
@@ -281,6 +306,10 @@ async function writeSnapshot(outputDir, snapshot) {
   await writeJson(join(outputDir, "status.json"), snapshot.status);
   await writeJson(join(outputDir, "catalog.json"), snapshot.catalog);
   await writeJson(join(outputDir, "sheet.json"), snapshot.sheet);
+  await writeJson(join(outputDir, "anilist-cache.json"), {
+    generatedAt: snapshot.status.sync.lastRebuildFinishedAt,
+    items: [...snapshot.anilistCache.values()],
+  });
 
   let written = 0;
   const total = snapshot.entries.size;
@@ -336,6 +365,8 @@ function buildStaticSnapshot(snapshot) {
       excerpt: summarizeNotes(entry.notes ?? ""),
       incomplete: entry.incomplete === true,
       sourceUpdatedAt: entry.updated,
+      bestGroups: uniqueReleaseGroups(torrents.filter((torrent) => torrent.isBest)),
+      altGroups: uniqueReleaseGroups(torrents.filter((torrent) => !torrent.isBest)),
       titles: buildTitles(entry.alID, media),
       coverImage: {
         extraLarge: media?.coverImage?.extraLarge ?? null,
@@ -354,8 +385,8 @@ function buildStaticSnapshot(snapshot) {
     };
 
     items.push(catalogItem);
-    const bestGroups = uniqueReleaseGroups(torrents.filter((torrent) => torrent.isBest));
-    const altGroups = uniqueReleaseGroups(torrents.filter((torrent) => !torrent.isBest));
+    const bestGroups = catalogItem.bestGroups;
+    const altGroups = catalogItem.altGroups;
 
     sheetItems.push({
       alId: entry.alID,
@@ -486,6 +517,7 @@ function buildStaticSnapshot(snapshot) {
         );
       }),
     },
+    anilistCache: snapshot.anilistMedia,
     entries: entryPayloads,
   };
 }
@@ -673,7 +705,25 @@ function validateSourceSnapshot(listIds, entries) {
 
 async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit, accessToken, existingCache) {
   const mediaMap = new Map();
-  const batches = chunk(ids, batchSize);
+  const missingIds = [];
+
+  for (const id of ids) {
+    const cached = existingCache.get(id) ?? null;
+    if (cached) {
+      mediaMap.set(id, cached);
+      continue;
+    }
+    missingIds.push(id);
+  }
+
+  if (mediaMap.size) {
+    logStep(`Reused cached AniList metadata for ${mediaMap.size}/${ids.length} entries.`);
+  }
+
+  const batches = chunk(missingIds, batchSize);
+  if (batches.length === 0) {
+    return mediaMap;
+  }
 
   for (const [index, batch] of batches.entries()) {
     let payload;

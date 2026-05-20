@@ -10,3 +10,4 @@ worker-configuration.d.ts
 .sync-token.tmp
 tmp/
 frontend/public/mirror-data/
+.mirror-build-report.json

@@ -35,6 +35,8 @@ export type CatalogItem = {
   excerpt: string | null;
   incomplete: boolean;
   sourceUpdatedAt: string;
+  bestGroups: string[];
+  altGroups: string[];
   titles: {
     userPreferred: string | null;
     english: string | null;

@@ -254,13 +254,9 @@ async function renderCatalog(status: MirrorStatus) {
   const nextButton = query<HTMLButtonElement>("#catalog-next");
   const lastButton = query<HTMLButtonElement>("#catalog-last");
 
-  let renderToken = 0;
   let currentPayload: CatalogPayload | null = null;
 
   const renderPage = () => {
-    renderToken += 1;
-    const activeRenderToken = renderToken;
-
     state.search = searchInput.value.trim();
     state.format = formatSelect.value;
     state.season = seasonSelect.value;
@@ -312,15 +308,6 @@ async function renderCatalog(status: MirrorStatus) {
     lastButton.disabled = currentPage >= totalPages;
 
     wireCatalogActions(body, mobileList);
-
-    void ensureGroupSummaries(currentPayload.items).then(() => {
-      if (renderToken !== activeRenderToken) {
-        return;
-      }
-      body.innerHTML = currentPayload!.items.map(renderCatalogRow).join("");
-      mobileList.innerHTML = currentPayload!.items.map(renderCatalogMobileCard).join("");
-      wireCatalogActions(body, mobileList);
-    });
   };
 
   const resetAndRender = () => {
@@ -1831,6 +1818,24 @@ function seasonOrder(season: string) {
 }
 
 function readGroupSummary(item: CatalogItem): CatalogGroupSummary {
+  const bestGroups = item.bestGroups ?? [];
+  const altGroups = item.altGroups ?? [];
+
+  if (bestGroups.length || altGroups.length || item.torrentCount === 0) {
+    return {
+      bestLabel: bestGroups.length
+        ? bestGroups.join(" / ")
+        : item.bestTorrentCount
+          ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}`
+          : "None",
+      altLabel: altGroups.length
+        ? altGroups.join(" / ")
+        : item.torrentCount - item.bestTorrentCount > 0
+          ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}`
+          : "None",
+    };
+  }
+
   return (
     groupSummaryCache.get(item.alId) ?? {
       bestLabel: item.bestTorrentCount ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}` : "None",
@@ -1967,8 +1972,8 @@ async function loadSheetPayload(): Promise<SheetPayload> {
         torrentCount: item.torrentCount,
         bestCount: item.bestTorrentCount,
         altCount: Math.max(0, item.torrentCount - item.bestTorrentCount),
-        bestGroups: [],
-        altGroups: [],
+        bestGroups: item.bestGroups ?? [],
+        altGroups: item.altGroups ?? [],
         excerpt: item.excerpt,
         updatedAt: item.sourceUpdatedAt,
         searchText: item.searchText,
