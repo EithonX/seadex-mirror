@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
@@ -86,6 +86,7 @@ async function main() {
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
   const reportPath = args.report ? resolve(args.report) : "";
   const force = args.force === "true";
+  const refreshAniList = args.refreshAniList === "true";
 
   warnAniListCredentialMode(anilistAccessToken, anilistClientId, anilistClientSecret);
   logStep(`Starting snapshot build${force ? " (forced)" : ""}.`);
@@ -135,6 +136,7 @@ async function main() {
     retryLimit,
     anilistAccessToken,
     existingSnapshot?.aniListCache ?? new Map(),
+    refreshAniList,
   );
   logStep(`Resolved AniList metadata for ${anilistMedia.size} entries.`);
 
@@ -174,6 +176,7 @@ async function main() {
 async function loadExistingSnapshot(outputDir, statusUrl) {
   try {
     await access(join(outputDir, "status.json"));
+    await access(join(outputDir, "anilist-cache.json"));
     await access(join(outputDir, "entries"));
   } catch {
     return loadRemoteStatus(statusUrl);
@@ -183,7 +186,7 @@ async function loadExistingSnapshot(outputDir, statusUrl) {
     const status = JSON.parse(await readFile(join(outputDir, "status.json"), "utf8"));
     return {
       status,
-      aniListCache: await loadExistingAniListCache(join(outputDir, "entries")),
+      aniListCache: await loadAniListCacheFile(join(outputDir, "anilist-cache.json")),
     };
   } catch {
     return loadRemoteStatus(statusUrl);
@@ -224,56 +227,29 @@ async function loadRemoteAniListCache(cacheUrl) {
       return new Map();
     }
 
-    const payload = await response.json();
-    return new Map(
-      Array.isArray(payload?.items)
-        ? payload.items
-            .filter((item) => Number.isInteger(item?.id) && item.id > 0)
-            .map((item) => [item.id, item])
-        : [],
-    );
+    return buildAniListCacheMap(await response.json());
   } catch {
     return new Map();
   }
 }
 
-async function loadExistingAniListCache(entriesDir) {
-  const cache = new Map();
-  const files = await readdir(entriesDir);
-
-  for (const file of files) {
-    if (!file.endsWith(".json")) {
-      continue;
-    }
-
-    try {
-      const payload = JSON.parse(await readFile(join(entriesDir, file), "utf8"));
-      const entry = payload?.entry;
-      if (!entry?.alId) {
-        continue;
-      }
-
-      cache.set(entry.alId, {
-        id: entry.alId,
-        title: entry.titles,
-        coverImage: entry.coverImage,
-        season: entry.season,
-        seasonYear: entry.seasonYear,
-        startDate: { year: entry.startYear },
-        format: entry.format,
-        status: entry.status,
-        episodes: entry.episodes,
-        duration: entry.duration,
-        averageScore: entry.averageScore,
-        genres: entry.genres,
-        relations: { edges: Array.isArray(entry.relations) ? entry.relations : [] },
-      });
-    } catch {
-      continue;
-    }
+async function loadAniListCacheFile(filePath) {
+  try {
+    const payload = JSON.parse(await readFile(filePath, "utf8"));
+    return buildAniListCacheMap(payload);
+  } catch {
+    return new Map();
   }
+}
 
-  return cache;
+function buildAniListCacheMap(payload) {
+  return new Map(
+    Array.isArray(payload?.items)
+      ? payload.items
+          .filter((item) => Number.isInteger(item?.id) && item.id > 0)
+          .map((item) => [item.id, item])
+      : [],
+  );
 }
 
 function shouldSkipRebuild(existingSnapshot, nextProbeSignature) {
@@ -703,21 +679,27 @@ function validateSourceSnapshot(listIds, entries) {
   }
 }
 
-async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit, accessToken, existingCache) {
+async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit, accessToken, existingCache, refreshAniList) {
   const mediaMap = new Map();
   const missingIds = [];
 
-  for (const id of ids) {
-    const cached = existingCache.get(id) ?? null;
-    if (cached) {
-      mediaMap.set(id, cached);
-      continue;
+  if (!refreshAniList) {
+    for (const id of ids) {
+      const cached = existingCache.get(id) ?? null;
+      if (cached) {
+        mediaMap.set(id, cached);
+        continue;
+      }
+      missingIds.push(id);
     }
-    missingIds.push(id);
+  } else {
+    missingIds.push(...ids);
   }
 
   if (mediaMap.size) {
     logStep(`Reused cached AniList metadata for ${mediaMap.size}/${ids.length} entries.`);
+  } else if (refreshAniList) {
+    logStep(`AniList cache refresh requested for ${ids.length} entries.`);
   }
 
   const batches = chunk(missingIds, batchSize);
@@ -877,10 +859,8 @@ function filterRelevantRelations(edges, availableAnimeIds) {
   }
 
   return edges.filter((edge) => {
-    const relationType = edge?.relationType?.toUpperCase?.();
     const node = edge?.node;
     return (
-      (relationType === "PREQUEL" || relationType === "SEQUEL") &&
       node?.id &&
       availableAnimeIds.has(node.id) &&
       (node.type === undefined || node.type === null || node.type === "ANIME")

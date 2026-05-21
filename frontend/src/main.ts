@@ -824,16 +824,9 @@ async function renderEntry(status: MirrorStatus, alId: number) {
     const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
     const entry = payload.entry;
     const availableIds = new Set(catalog.items.map((item) => item.alId));
-    const filteredRelations = entry.relations.filter((relation) => {
-      const relationType = relation.relationType?.toUpperCase();
-      const node = relation.node as (EntryPayload["entry"]["relations"][number]["node"] & { type?: string | null }) | undefined;
-      return (
-        (relationType === "PREQUEL" || relationType === "SEQUEL") &&
-        node?.id !== undefined &&
-        availableIds.has(node.id) &&
-        (node.type === undefined || node.type === null || node.type === "ANIME")
-      );
-    });
+    const filteredRelations = entry.relations.filter((relation) =>
+      isDisplayableAnimeRelation(relation, availableIds),
+    );
     setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
 
     appRoot.innerHTML = renderPageFrame(
@@ -1483,6 +1476,18 @@ function renderRelationsSection(relations: EntryPayload["entry"]["relations"]) {
 
 function renderRelationChip(label: string) {
   return `<span class="relation-chip">${escapeHtml(label)}</span>`;
+}
+
+function isDisplayableAnimeRelation(
+  relation: EntryPayload["entry"]["relations"][number],
+  availableIds: Set<number>,
+) {
+  const node = relation.node;
+  return (
+    node?.id !== undefined &&
+    availableIds.has(node.id) &&
+    (node.type === undefined || node.type === null || node.type === "ANIME")
+  );
 }
 
 function renderFatal(message: string) {

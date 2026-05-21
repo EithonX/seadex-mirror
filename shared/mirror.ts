@@ -152,6 +152,7 @@ export type EntryPayload = {
         startDate?: { year?: number | null };
         format?: string | null;
         status?: string | null;
+        type?: string | null;
         episodes?: number | null;
       };
     }>;
