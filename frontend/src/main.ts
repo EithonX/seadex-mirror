@@ -11,6 +11,7 @@ import {
 } from "../../shared/mirror";
 
 const DATA_ROOT = "/mirror-data";
+const COMPACT_LAYOUT_MEDIA_QUERY = "(max-width: 760px)";
 const DEFAULT_PAGE_SIZE = 30;
 const SEARCH_RESULTS_LIMIT = 10;
 const THEME_KEY = "seadex-mirror-theme";
@@ -255,6 +256,7 @@ async function renderCatalog(status: MirrorStatus) {
   const prevButton = query<HTMLButtonElement>("#catalog-prev");
   const nextButton = query<HTMLButtonElement>("#catalog-next");
   const lastButton = query<HTMLButtonElement>("#catalog-last");
+  const compactLayoutMedia = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
 
   let currentPayload: CatalogPayload | null = null;
 
@@ -278,18 +280,24 @@ async function renderCatalog(status: MirrorStatus) {
 
     const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
     const currentPage = currentPayload.pagination.total === 0 ? 0 : Math.floor(state.offset / state.limit) + 1;
+    const useMobileLayout = compactLayoutMedia.matches;
 
     if (currentPayload.items.length === 0) {
-      body.innerHTML = `
-        <tr>
-          <td class="catalog-empty" colspan="8">No mirrored entries matched that filter.</td>
-        </tr>
-      `;
-      mobileList.innerHTML = `
-        <div class="catalog-empty catalog-empty--mobile">
-          No mirrored entries matched that filter.
-        </div>
-      `;
+      if (useMobileLayout) {
+        body.innerHTML = "";
+        mobileList.innerHTML = `
+          <div class="catalog-empty catalog-empty--mobile">
+            No mirrored entries matched that filter.
+          </div>
+        `;
+      } else {
+        body.innerHTML = `
+          <tr>
+            <td class="catalog-empty" colspan="8">No mirrored entries matched that filter.</td>
+          </tr>
+        `;
+        mobileList.innerHTML = "";
+      }
       summary.textContent = "0 row(s) loaded.";
       indicator.textContent = "Page 0 of 0";
       firstButton.disabled = true;
@@ -299,8 +307,13 @@ async function renderCatalog(status: MirrorStatus) {
       return;
     }
 
-    body.innerHTML = currentPayload.items.map(renderCatalogRow).join("");
-    mobileList.innerHTML = currentPayload.items.map(renderCatalogMobileCard).join("");
+    if (useMobileLayout) {
+      body.innerHTML = "";
+      mobileList.innerHTML = currentPayload.items.map(renderCatalogMobileCard).join("");
+    } else {
+      body.innerHTML = currentPayload.items.map(renderCatalogRow).join("");
+      mobileList.innerHTML = "";
+    }
     summary.textContent = `${currentPayload.items.length} row(s) loaded.`;
     indicator.textContent = `Page ${currentPage} of ${totalPages}`;
 
@@ -312,9 +325,11 @@ async function renderCatalog(status: MirrorStatus) {
     wireCatalogActions(body, mobileList);
   };
 
+  const scheduleRender = createRenderScheduler(renderPage);
+
   const resetAndRender = () => {
     state.offset = 0;
-    renderPage();
+    scheduleRender();
   };
 
   const debouncedRender = debounce(resetAndRender, 120);
@@ -324,15 +339,16 @@ async function renderCatalog(status: MirrorStatus) {
   seasonSelect.addEventListener("change", resetAndRender);
   sortSelect.addEventListener("change", resetAndRender);
   limitSelect.addEventListener("change", resetAndRender);
+  bindMediaQueryChange(compactLayoutMedia, scheduleRender);
 
   firstButton.addEventListener("click", () => {
     state.offset = 0;
-    renderPage();
+    scheduleRender();
   });
 
   prevButton.addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - state.limit);
-    renderPage();
+    scheduleRender();
   });
 
   nextButton.addEventListener("click", () => {
@@ -340,7 +356,7 @@ async function renderCatalog(status: MirrorStatus) {
       return;
     }
     state.offset = currentPayload.pagination.nextOffset ?? state.offset;
-    renderPage();
+    scheduleRender();
   });
 
   lastButton.addEventListener("click", () => {
@@ -349,7 +365,7 @@ async function renderCatalog(status: MirrorStatus) {
     }
     const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
     state.offset = (totalPages - 1) * state.limit;
-    renderPage();
+    scheduleRender();
   });
 
   renderPage();
@@ -495,6 +511,7 @@ async function renderSheet(status: MirrorStatus) {
   const previousButton = query<HTMLButtonElement>("#sheet-prev");
   const nextButton = query<HTMLButtonElement>("#sheet-next");
   const lastButton = query<HTMLButtonElement>("#sheet-last");
+  const compactLayoutMedia = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
 
   let currentPayload: ReturnType<typeof filterSheetItems> | null = null;
 
@@ -518,83 +535,88 @@ async function renderSheet(status: MirrorStatus) {
     state.offset = payload.filters.offset;
     const totalPages = Math.max(1, Math.ceil(payload.pagination.total / state.limit));
     const currentPage = Math.floor(payload.filters.offset / state.limit) + 1;
+    const useMobileLayout = compactLayoutMedia.matches;
 
-    body.innerHTML = payload.items.length
-      ? payload.items
-          .map(
-            (item) => `
-          <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
-            <td>
-              <div class="catalog-title">
-                <span class="catalog-title__text">${escapeHtml(item.title)}</span>
-                ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
-              </div>
-            </td>
-            <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
-            <td>${item.year ?? "-"}</td>
-            <td>${item.episodes ?? "-"}</td>
-            <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</td>
-            <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</td>
-            <td>${formatDate(item.updatedAt)}</td>
-            <td class="catalog-row__actions">
-              <div class="row-menu-shell">
-                <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-row-menu-${item.alId}">
+    if (useMobileLayout) {
+      body.innerHTML = "";
+      mobile.innerHTML = payload.items.length
+        ? payload.items
+            .map(
+              (item) => `
+            <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
+              <div class="catalog-card__top">
+                <div class="catalog-card__title">
+                  <strong>${escapeHtml(item.title)}</strong>
+                  ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+                </div>
+                <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-mobile-row-menu-${item.alId}">
                   ${renderDotsIcon()}
                 </button>
-                <div id="sheet-row-menu-${item.alId}" class="row-menu" hidden>
+                <div id="sheet-mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
                   <a href="/${item.alId}">Open entry</a>
                   <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
                   <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
                 </div>
               </div>
-            </td>
-          </tr>
-        `,
-          )
-          .join("")
-      : `<tr><td class="catalog-empty" colspan="8">No entries matched that sheet filter.</td></tr>`;
-
-    mobile.innerHTML = payload.items.length
-      ? payload.items
-          .map(
-            (item) => `
-          <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
-            <div class="catalog-card__top">
-              <div class="catalog-card__title">
-                <strong>${escapeHtml(item.title)}</strong>
-                ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+              <div class="catalog-card__meta">
+                <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
+                <span>${item.year ?? "Unknown"}</span>
+                <span>${item.episodes ?? "?"} ep</span>
               </div>
-              <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-mobile-row-menu-${item.alId}">
-                ${renderDotsIcon()}
-              </button>
-              <div id="sheet-mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
-                <a href="/${item.alId}">Open entry</a>
-                <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
-                <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
-              </div>
-            </div>
-            <div class="catalog-card__meta">
-              <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
-              <span>${item.year ?? "Unknown"}</span>
-              <span>${item.episodes ?? "?"} ep</span>
-            </div>
-            <dl class="catalog-card__groups">
-              <div>
-                <dt>Best</dt>
-                <dd>${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</dd>
-              </div>
-              <div>
-                <dt>Alt</dt>
-                <dd>${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</dd>
-              </div>
-            </dl>
-            ${item.excerpt ? `<p class="sheet-mobile-notes">${escapeHtml(item.excerpt)}</p>` : ""}
-            <div class="catalog-card__footer">Updated ${formatDate(item.updatedAt)}</div>
-          </article>
-        `,
-          )
-          .join("")
-      : `<div class="catalog-empty catalog-empty--mobile">No entries matched that sheet filter.</div>`;
+              <dl class="catalog-card__groups">
+                <div>
+                  <dt>Best</dt>
+                  <dd>${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</dd>
+                </div>
+                <div>
+                  <dt>Alt</dt>
+                  <dd>${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</dd>
+                </div>
+              </dl>
+              ${item.excerpt ? `<p class="sheet-mobile-notes">${escapeHtml(item.excerpt)}</p>` : ""}
+              <div class="catalog-card__footer">Updated ${formatDate(item.updatedAt)}</div>
+            </article>
+          `,
+            )
+            .join("")
+        : `<div class="catalog-empty catalog-empty--mobile">No entries matched that sheet filter.</div>`;
+    } else {
+      body.innerHTML = payload.items.length
+        ? payload.items
+            .map(
+              (item) => `
+            <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
+              <td>
+                <div class="catalog-title">
+                  <span class="catalog-title__text">${escapeHtml(item.title)}</span>
+                  ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+                </div>
+              </td>
+              <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
+              <td>${item.year ?? "-"}</td>
+              <td>${item.episodes ?? "-"}</td>
+              <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</td>
+              <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</td>
+              <td>${formatDate(item.updatedAt)}</td>
+              <td class="catalog-row__actions">
+                <div class="row-menu-shell">
+                  <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-row-menu-${item.alId}">
+                    ${renderDotsIcon()}
+                  </button>
+                  <div id="sheet-row-menu-${item.alId}" class="row-menu" hidden>
+                    <a href="/${item.alId}">Open entry</a>
+                    <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+                    <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          `,
+            )
+            .join("")
+        : `<tr><td class="catalog-empty" colspan="8">No entries matched that sheet filter.</td></tr>`;
+      mobile.innerHTML = "";
+    }
 
     summary.textContent = `${payload.pagination.count} row(s) loaded.`;
     indicator.textContent = `Page ${currentPage} of ${totalPages}`;
@@ -607,24 +629,27 @@ async function renderSheet(status: MirrorStatus) {
     wireCatalogActions(body, mobile);
   };
 
+  const scheduleRender = createRenderScheduler(renderPage);
+
   const rerenderFromTop = () => {
     state.offset = 0;
-    renderPage();
+    scheduleRender();
   };
 
   searchInput.addEventListener("input", debounce(rerenderFromTop, 100));
   formatSelect.addEventListener("change", rerenderFromTop);
   sortSelect.addEventListener("change", rerenderFromTop);
   limitSelect.addEventListener("change", rerenderFromTop);
+  bindMediaQueryChange(compactLayoutMedia, scheduleRender);
 
   firstButton.addEventListener("click", () => {
     state.offset = 0;
-    renderPage();
+    scheduleRender();
   });
 
   previousButton.addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - state.limit);
-    renderPage();
+    scheduleRender();
   });
 
   nextButton.addEventListener("click", () => {
@@ -632,7 +657,7 @@ async function renderSheet(status: MirrorStatus) {
       return;
     }
     state.offset = currentPayload.pagination.nextOffset;
-    renderPage();
+    scheduleRender();
   });
 
   lastButton.addEventListener("click", () => {
@@ -641,7 +666,7 @@ async function renderSheet(status: MirrorStatus) {
     }
     const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
     state.offset = (totalPages - 1) * state.limit;
-    renderPage();
+    scheduleRender();
   });
 
   liveTab.addEventListener("click", () => {
@@ -2215,6 +2240,30 @@ function debounce(callback: () => void | Promise<void>, delayMs: number) {
       void callback();
     }, delayMs);
   };
+}
+
+function createRenderScheduler(callback: () => void | Promise<void>) {
+  let frameId: number | null = null;
+
+  return () => {
+    if (frameId !== null) {
+      return;
+    }
+
+    frameId = window.requestAnimationFrame(() => {
+      frameId = null;
+      void callback();
+    });
+  };
+}
+
+function bindMediaQueryChange(mediaQuery: MediaQueryList, callback: () => void) {
+  if (typeof mediaQuery.addEventListener === "function") {
+    mediaQuery.addEventListener("change", callback);
+    return;
+  }
+
+  mediaQuery.addListener(callback);
 }
 
 function clampLimit(value: string | null) {
