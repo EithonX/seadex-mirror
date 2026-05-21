@@ -806,148 +806,179 @@ async function renderEntry(status: MirrorStatus, alId: number) {
 
   wireCommonUi(status, "entry");
 
-  const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
-  const entry = payload.entry;
-  const catalog = await getCatalog();
-  const availableIds = new Set(catalog.items.map((item) => item.alId));
-  const filteredRelations = entry.relations.filter((relation) => {
-    const relationType = relation.relationType?.toUpperCase();
-    const node = relation.node as (EntryPayload["entry"]["relations"][number]["node"] & { type?: string | null }) | undefined;
-    return (
-      (relationType === "PREQUEL" || relationType === "SEQUEL") &&
-      node?.id !== undefined &&
-      availableIds.has(node.id) &&
-      (node.type === undefined || node.type === null || node.type === "ANIME")
-    );
-  });
-  setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
+  try {
+    const catalog = await getCatalog();
+    const entryExists = catalog.items.some((item) => item.alId === alId);
 
-  appRoot.innerHTML = renderPageFrame(
-    status,
-    "entry",
-    `
-      <main class="page page--entry">
-        ${
-          entry.incomplete
-            ? `
-            <div class="alert alert--danger">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-triangle-alert"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-              <div class="alert__content">This entry is marked as incomplete.</div>
-            </div>
-          `
-            : ""
-        }
-        <div class="entry-layout">
-          <aside class="entry-sidebar">
-            <section class="entry-hero">
-              <div class="entry-hero__poster">
-                ${
-                  entry.coverImage.extraLarge
-                    ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} cover" />`
-                    : `<div class="poster-fallback">No poster art was included in the snapshot.</div>`
-                }
+    if (!entryExists) {
+      appRoot.innerHTML = renderPageFrame(
+        status,
+        "entry",
+        renderEntryNotFound(alId),
+      );
+      wireCommonUi(status, "entry");
+      setDocumentMeta(`Entry Not Found | SeaDex Mirror`);
+      return;
+    }
+
+    const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
+    const entry = payload.entry;
+    const availableIds = new Set(catalog.items.map((item) => item.alId));
+    const filteredRelations = entry.relations.filter((relation) => {
+      const relationType = relation.relationType?.toUpperCase();
+      const node = relation.node as (EntryPayload["entry"]["relations"][number]["node"] & { type?: string | null }) | undefined;
+      return (
+        (relationType === "PREQUEL" || relationType === "SEQUEL") &&
+        node?.id !== undefined &&
+        availableIds.has(node.id) &&
+        (node.type === undefined || node.type === null || node.type === "ANIME")
+      );
+    });
+    setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
+
+    appRoot.innerHTML = renderPageFrame(
+      status,
+      "entry",
+      `
+        <main class="page page--entry">
+          ${
+            entry.incomplete
+              ? `
+              <div class="alert alert--danger">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-triangle-alert"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                <div class="alert__content">This entry is marked as incomplete.</div>
               </div>
-              <div class="entry-hero__body">
-                <h1>${escapeHtml(entry.titles.english ?? entry.titles.display)}</h1>
-                ${
-                  entry.titles.userPreferred && entry.titles.userPreferred !== entry.titles.english
-                    ? `<h2>${escapeHtml(entry.titles.userPreferred)}</h2>`
-                    : ""
-                }
-                ${
-                  entry.genres && entry.genres.length > 0
-                    ? `
-                    <div class="entry-genres">
-                      ${entry.genres.slice(0, 4).map(g => `<span class="pill pill--tag">${escapeHtml(g)}</span>`).join("")}
+            `
+              : ""
+          }
+          <div class="entry-layout">
+            <aside class="entry-sidebar">
+              <section class="entry-hero">
+                <div class="entry-hero__poster">
+                  ${
+                    entry.coverImage.extraLarge
+                      ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} cover" />`
+                      : `<div class="poster-fallback">No poster art was included in the snapshot.</div>`
+                  }
+                </div>
+                <div class="entry-hero__body">
+                  <h1>${escapeHtml(entry.titles.english ?? entry.titles.display)}</h1>
+                  ${
+                    entry.titles.userPreferred && entry.titles.userPreferred !== entry.titles.english
+                      ? `<h2>${escapeHtml(entry.titles.userPreferred)}</h2>`
+                      : ""
+                  }
+                  ${
+                    entry.genres && entry.genres.length > 0
+                      ? `
+                      <div class="entry-genres">
+                        ${entry.genres.slice(0, 4).map(g => `<span class="pill pill--tag">${escapeHtml(g)}</span>`).join("")}
+                      </div>
+                    `
+                      : ""
+                  }
+                  <div class="entry-meta-wrap">
+                    <div class="entry-meta-row">
+                      <span>${renderCalendarIcon()} ${entry.season ? escapeHtml(capitalize(entry.season)) + " " : ""}${entry.seasonYear ?? entry.startYear ?? "Unknown"}</span>
+                      <span>${escapeHtml(formatSeriesLabel(entry))} ${renderFormatIcon()}</span>
                     </div>
-                  `
-                    : ""
-                }
-                <div class="entry-meta-wrap">
-                  <div class="entry-meta-row">
-                    <span>${renderCalendarIcon()} ${entry.season ? escapeHtml(capitalize(entry.season)) + " " : ""}${entry.seasonYear ?? entry.startYear ?? "Unknown"}</span>
-                    <span>${escapeHtml(formatSeriesLabel(entry))} ${renderFormatIcon()}</span>
-                  </div>
-                  <div class="entry-meta-row">
-                    <span title="Average Score"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-star"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> ${entry.averageScore ? `${entry.averageScore}%` : "No score"}</span>
-                    <span title="Status">${entry.status ? escapeHtml(capitalize(entry.status.toLowerCase())) : "Unknown"} <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
-                  </div>
-                  <div class="entry-meta-row">
-                    <span title="Created on">${renderCalendarPlusIcon()} ${formatDate(entry.sourceCreatedAt)}</span>
-                    <span title="Updated on">${formatDate(entry.sourceUpdatedAt)} ${renderCalendarUpIcon()}</span>
+                    <div class="entry-meta-row">
+                      <span title="Average Score"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-star"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> ${entry.averageScore ? `${entry.averageScore}%` : "No score"}</span>
+                      <span title="Status">${entry.status ? escapeHtml(capitalize(entry.status.toLowerCase())) : "Unknown"} <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+                    </div>
+                    <div class="entry-meta-row">
+                      <span title="Created on">${renderCalendarPlusIcon()} ${formatDate(entry.sourceCreatedAt)}</span>
+                      <span title="Updated on">${formatDate(entry.sourceUpdatedAt)} ${renderCalendarUpIcon()}</span>
+                    </div>
                   </div>
                 </div>
+              </section>
+
+              ${entry.comparisonLinks.length ? renderComparisonsSection(entry.comparisonLinks) : ""}
+
+              <hr class="section-rule" />
+
+              <section class="sidebar-section">
+                <h3>Links</h3>
+                <div class="sidebar-stack sidebar-stack--links">
+                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
+                    <img src="/favicon.png" alt="SeaDex" />
+                    <span>SeaDex</span>
+                  </a>
+                  <a class="comparison-link comparison-link--secondary" href="https://anilist.co/anime/${entry.alId}" target="_blank" rel="noreferrer">
+                    <img src="/anilist.svg" alt="AniList" />
+                    <span>AniList</span>
+                  </a>
+                </div>
+              </section>
+            </aside>
+
+            <section class="entry-main">
+              <section class="content-section">
+                <h2>Torrents</h2>
+                <div class="torrent-grid">
+                  ${
+                    entry.theoreticalBest
+                      ? `
+                        <article class="torrent-card torrent-card--theoretical">
+                          <div class="torrent-card__header">
+                            <h3>${escapeHtml(entry.theoreticalBest)}</h3>
+                          </div>
+                          <div class="torrent-card__badges">
+                            <span class="pill pill--warn">Unmuxed</span>
+                            <span class="pill pill--best">Best</span>
+                          </div>
+                        </article>
+                      `
+                      : ""
+                  }
+                  ${renderTorrentCards(payload.torrents)}
+                </div>
+              </section>
+
+              <hr class="section-divider" />
+
+              <section class="content-section">
+                <h2>Notes</h2>
+                <div class="entry-notes">${escapeHtml(entry.notes || "No notes were included for this entry.")}</div>
+              </section>
+
+              ${renderRelationsSection(filteredRelations)}
+            </section>
+          </div>
+
+          <div class="entry-footer">
+            <section class="content-section content-section--subtle">
+              <div class="mirror-inline">
+                <span>${status.counts.entries} mirrored entries</span>
+                <span>${status.integrity.expandedTorrentParity === "match" ? "Expanded torrent parity locked" : "Parity warning"}</span>
+                <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
               </div>
             </section>
+          </div>
+        </main>
+        ${renderSearchDialog()}
+      `,
+    );
 
-            ${entry.comparisonLinks.length ? renderComparisonsSection(entry.comparisonLinks) : ""}
+    wireCommonUi(status, "entry");
+  } catch (error) {
+    console.error("Failed to load entry:", error);
+    let displayMessage = error instanceof Error ? error.message : String(error);
+    if (displayMessage.includes("Mirror data is missing") || displayMessage.includes("npm run")) {
+      displayMessage = "The detail for this anime entry could not be loaded because it is currently undergoing maintenance. Please check back shortly.";
+    } else {
+      displayMessage = "A temporary network issue occurred. Please refresh or try again later.";
+    }
 
-            <hr class="section-rule" />
-
-            <section class="sidebar-section">
-              <h3>Links</h3>
-              <div class="sidebar-stack sidebar-stack--links">
-                <a class="comparison-link comparison-link--secondary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
-                  <img src="/favicon.png" alt="SeaDex" />
-                  <span>SeaDex</span>
-                </a>
-                <a class="comparison-link comparison-link--secondary" href="https://anilist.co/anime/${entry.alId}" target="_blank" rel="noreferrer">
-                  <img src="/anilist.svg" alt="AniList" />
-                  <span>AniList</span>
-                </a>
-              </div>
-            </section>
-          </aside>
-
-          <section class="entry-main">
-            <section class="content-section">
-              <h2>Torrents</h2>
-              <div class="torrent-grid">
-                ${
-                  entry.theoreticalBest
-                    ? `
-                      <article class="torrent-card torrent-card--theoretical">
-                        <div class="torrent-card__header">
-                          <h3>${escapeHtml(entry.theoreticalBest)}</h3>
-                        </div>
-                        <div class="torrent-card__badges">
-                          <span class="pill pill--warn">Unmuxed</span>
-                          <span class="pill pill--best">Best</span>
-                        </div>
-                      </article>
-                    `
-                    : ""
-                }
-                ${renderTorrentCards(payload.torrents)}
-              </div>
-            </section>
-
-            <hr class="section-divider" />
-
-            <section class="content-section">
-              <h2>Notes</h2>
-              <div class="entry-notes">${escapeHtml(entry.notes || "No notes were included for this entry.")}</div>
-            </section>
-
-            ${renderRelationsSection(filteredRelations)}
-          </section>
-        </div>
-
-        <div class="entry-footer">
-          <section class="content-section content-section--subtle">
-            <div class="mirror-inline">
-              <span>${status.counts.entries} mirrored entries</span>
-              <span>${status.integrity.expandedTorrentParity === "match" ? "Expanded torrent parity locked" : "Parity warning"}</span>
-              <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
-            </div>
-          </section>
-        </div>
-      </main>
-      ${renderSearchDialog()}
-    `,
-  );
-
-  wireCommonUi(status, "entry");
+    appRoot.innerHTML = renderPageFrame(
+      status,
+      "entry",
+      renderEntryError(alId, displayMessage),
+    );
+    wireCommonUi(status, "entry");
+    setDocumentMeta(`Error | SeaDex Mirror`);
+  }
 }
 
 function renderPageFrame(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet", content: string) {
@@ -1455,14 +1486,66 @@ function renderRelationChip(label: string) {
 }
 
 function renderFatal(message: string) {
+  let displayMessage = message;
+  if (message.includes("Mirror data is missing") || message.includes("npm run")) {
+    displayMessage = "The mirror database is currently undergoing maintenance. Please check back shortly.";
+  }
+
   return `
     <main class="fatal">
       <div class="fatal__panel">
         <h1>Something slipped.</h1>
-        <p>${escapeHtml(message)}</p>
+        <p>${escapeHtml(displayMessage)}</p>
         <a class="comparison-link comparison-link--secondary" href="/">Return home</a>
       </div>
     </main>
+  `;
+}
+
+function renderEntryNotFound(alId: number) {
+  return `
+    <main class="page page--error">
+      <div class="error-panel">
+        <div class="error-panel__badge">404</div>
+        <div class="error-panel__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search-x"><path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <h1>Entry Not Found</h1>
+        <p>We couldn't find a mirrored entry for ID <strong>${alId}</strong> in our catalog database. It may not be tracked yet or was removed.</p>
+        <div class="error-panel__actions">
+          <a class="comparison-link" href="/">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-left"><path d="m12 19-7-7 7-7"/><path d="M5 12h14"/></svg>
+            <span>Return to Catalog</span>
+          </a>
+        </div>
+      </div>
+    </main>
+    ${renderSearchDialog()}
+  `;
+}
+
+function renderEntryError(alId: number, message: string) {
+  return `
+    <main class="page page--error">
+      <div class="error-panel">
+        <div class="error-panel__badge error-panel__badge--error">ERROR</div>
+        <div class="error-panel__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-alert"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12" y1="16" y2="16"/></svg>
+        </div>
+        <h1>Failed to Load Entry</h1>
+        <p>${escapeHtml(message)}</p>
+        <div class="error-panel__actions">
+          <button class="comparison-link" onclick="window.location.reload()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-cw"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            <span>Retry Loading</span>
+          </button>
+          <a class="comparison-link comparison-link--secondary" href="/">
+            <span>Return to Catalog</span>
+          </a>
+        </div>
+      </div>
+    </main>
+    ${renderSearchDialog()}
   `;
 }
 
