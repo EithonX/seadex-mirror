@@ -1,5 +1,5 @@
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
@@ -9,6 +9,7 @@ const DEFAULT_ANILIST_BATCH_SIZE = 50;
 const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 5;
 const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
+const DEFAULT_ON_UNCHANGED = "skip";
 const PROGRESS_PREFIX = "[mirror-build]";
 const UPSTREAM_TRACKER_ORDER = [
   "Nyaa",
@@ -87,12 +88,15 @@ async function main() {
   const reportPath = args.report ? resolve(args.report) : "";
   const force = args.force === "true";
   const refreshAniList = args.refreshAniList === "true";
+  const onUnchanged = resolveOnUnchangedBehavior(args);
 
   warnAniListCredentialMode(anilistAccessToken, anilistClientId, anilistClientSecret);
   logStep(`Starting snapshot build${force ? " (forced)" : ""}.`);
 
   const startedAt = new Date().toISOString();
-  const existingSnapshot = await loadExistingSnapshot(outputDir, statusUrl);
+  const localSnapshot = await loadLocalSnapshot(outputDir);
+  const remoteSnapshot = localSnapshot ? null : await loadRemoteStatus(statusUrl);
+  const existingSnapshot = localSnapshot ?? remoteSnapshot;
   logStep("Fetching SeaDex list IDs...");
   const listIds = await fetchListIds(sourceBaseUrl);
   logStep(`Fetched ${listIds.length} list IDs.`);
@@ -101,8 +105,12 @@ async function main() {
   const probeSignature = buildProbeSignature(listIds, sourceProbe.items);
   logStep(`Computed upstream probe signature from ${sourceProbe.items.length} rows.`);
 
-  if (!force && shouldSkipRebuild(existingSnapshot, probeSignature)) {
+  const upstreamUnchanged = !force && shouldSkipRebuild(existingSnapshot, probeSignature);
+  const shouldMaterializeSnapshot = upstreamUnchanged && onUnchanged === "materialize" && !localSnapshot;
+
+  if (upstreamUnchanged && !shouldMaterializeSnapshot) {
     const report = {
+      action: "skipped",
       mode: "static-snapshot",
       skipped: true,
       reason: "upstream-unchanged",
@@ -110,12 +118,21 @@ async function main() {
       startedAt,
       finishedAt: new Date().toISOString(),
       probeSignature,
+      snapshotSource: existingSnapshot?.origin ?? null,
+      localSnapshotReady: Boolean(localSnapshot),
+      onUnchanged,
       entries: existingSnapshot?.status?.counts?.entries ?? null,
       torrents: existingSnapshot?.status?.counts?.torrents ?? null,
     };
     await writeOptionalReport(reportPath, report);
     console.log(JSON.stringify(report, null, 2));
     return;
+  }
+
+  if (shouldMaterializeSnapshot) {
+    logStep(
+      `Upstream is unchanged, but local mirror data is unavailable. Materializing a local snapshot using the ${existingSnapshot?.origin ?? "available"} cache.`,
+    );
   }
 
   logStep("Fetching full SeaDex entry snapshot...");
@@ -158,12 +175,16 @@ async function main() {
   logStep("Snapshot files written successfully.");
 
   const report = {
+    action: shouldMaterializeSnapshot ? "materialized" : "rebuilt",
     mode: "static-snapshot",
     skipped: false,
     sourceBaseUrl,
     startedAt,
     finishedAt,
     outputDir,
+    snapshotSource: existingSnapshot?.origin ?? null,
+    localSnapshotReady: true,
+    onUnchanged,
     entries: snapshot.catalog.items.length,
     entryFiles: snapshot.catalog.items.length,
     torrents: snapshot.status.counts.torrents,
@@ -173,23 +194,54 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 }
 
-async function loadExistingSnapshot(outputDir, statusUrl) {
+async function loadLocalSnapshot(outputDir) {
   try {
-    await access(join(outputDir, "status.json"));
-    await access(join(outputDir, "anilist-cache.json"));
-    await access(join(outputDir, "entries"));
-  } catch {
-    return loadRemoteStatus(statusUrl);
-  }
+    const statusPath = join(outputDir, "status.json");
+    const catalogPath = join(outputDir, "catalog.json");
+    const sheetPath = join(outputDir, "sheet.json");
+    const cachePath = join(outputDir, "anilist-cache.json");
+    const entriesDir = join(outputDir, "entries");
 
-  try {
-    const status = JSON.parse(await readFile(join(outputDir, "status.json"), "utf8"));
+    await access(statusPath);
+    await access(catalogPath);
+    await access(sheetPath);
+    await access(cachePath);
+    await access(entriesDir);
+
+    const [statusText, _catalogText, _sheetText, cacheText, entryFiles] = await Promise.all([
+      readFile(statusPath, "utf8"),
+      readFile(catalogPath, "utf8"),
+      readFile(sheetPath, "utf8"),
+      readFile(cachePath, "utf8"),
+      readdir(entriesDir),
+    ]);
+
+    const status = JSON.parse(statusText);
+    JSON.parse(_catalogText);
+    JSON.parse(_sheetText);
+    const cachePayload = JSON.parse(cacheText);
+    const expectedEntries = status?.counts?.entries;
+    const actualEntryFiles = entryFiles.filter((file) => file.endsWith(".json")).length;
+
+    if (!Number.isInteger(expectedEntries) || expectedEntries < 0) {
+      console.warn(`${PROGRESS_PREFIX} Local snapshot is missing a valid entry count in status.json. Ignoring local output.`);
+      return null;
+    }
+
+    if (actualEntryFiles !== expectedEntries) {
+      console.warn(
+        `${PROGRESS_PREFIX} Local snapshot entry count mismatch (${actualEntryFiles} files vs ${expectedEntries} expected). Ignoring local output.`,
+      );
+      return null;
+    }
+
     return {
+      origin: "local",
       status,
-      aniListCache: await loadAniListCacheFile(join(outputDir, "anilist-cache.json")),
+      aniListCache: buildAniListCacheMap(cachePayload),
     };
   } catch {
-    return loadRemoteStatus(statusUrl);
+    return null;
   }
 }
 
@@ -210,6 +262,7 @@ async function loadRemoteStatus(statusUrl) {
     const cacheUrl = new URL("anilist-cache.json", statusUrl).toString();
 
     return {
+      origin: "remote",
       status,
       aniListCache: await loadRemoteAniListCache(cacheUrl),
     };
@@ -228,15 +281,6 @@ async function loadRemoteAniListCache(cacheUrl) {
     }
 
     return buildAniListCacheMap(await response.json());
-  } catch {
-    return new Map();
-  }
-}
-
-async function loadAniListCacheFile(filePath) {
-  try {
-    const payload = JSON.parse(await readFile(filePath, "utf8"));
-    return buildAniListCacheMap(payload);
   } catch {
     return new Map();
   }
@@ -274,15 +318,20 @@ function warnAniListCredentialMode(accessToken, clientId, clientSecret) {
 }
 
 async function writeSnapshot(outputDir, snapshot) {
-  const entriesDir = join(outputDir, "entries");
+  const parentDir = dirname(outputDir);
+  const outputName = basename(outputDir);
+  const stagedDir = join(parentDir, `.${outputName}.tmp-${process.pid}-${Date.now()}`);
+  const backupDir = join(parentDir, `.${outputName}.bak-${process.pid}-${Date.now()}`);
+  const entriesDir = join(stagedDir, "entries");
 
-  await rm(outputDir, { recursive: true, force: true });
+  await rm(stagedDir, { recursive: true, force: true });
+  await rm(backupDir, { recursive: true, force: true });
   await mkdir(entriesDir, { recursive: true });
 
-  await writeJson(join(outputDir, "status.json"), snapshot.status);
-  await writeJson(join(outputDir, "catalog.json"), snapshot.catalog);
-  await writeJson(join(outputDir, "sheet.json"), snapshot.sheet);
-  await writeJson(join(outputDir, "anilist-cache.json"), {
+  await writeJson(join(stagedDir, "status.json"), snapshot.status);
+  await writeJson(join(stagedDir, "catalog.json"), snapshot.catalog);
+  await writeJson(join(stagedDir, "sheet.json"), snapshot.sheet);
+  await writeJson(join(stagedDir, "anilist-cache.json"), {
     generatedAt: snapshot.status.sync.lastRebuildFinishedAt,
     items: [...snapshot.anilistCache.values()],
   });
@@ -295,6 +344,33 @@ async function writeSnapshot(outputDir, snapshot) {
     if (written % 250 === 0 || written === total) {
       logStep(`Wrote ${written}/${total} entry files...`);
     }
+  }
+
+  let backupCreated = false;
+
+  try {
+    if (await pathExists(outputDir)) {
+      await rename(outputDir, backupDir);
+      backupCreated = true;
+    }
+
+    await rename(stagedDir, outputDir);
+
+    if (backupCreated) {
+      await rm(backupDir, { recursive: true, force: true });
+    }
+  } catch (error) {
+    await rm(stagedDir, { recursive: true, force: true });
+
+    if (!(await pathExists(outputDir)) && backupCreated && (await pathExists(backupDir))) {
+      try {
+        await rename(backupDir, outputDir);
+      } catch {
+        console.warn(`${PROGRESS_PREFIX} Failed to restore the previous snapshot after a write error.`);
+      }
+    }
+
+    throw error;
   }
 }
 
@@ -868,6 +944,15 @@ function filterRelevantRelations(edges, availableAnimeIds) {
   });
 }
 
+async function pathExists(targetPath) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseArgs(rawArgs) {
   const args = {};
   for (let index = 0; index < rawArgs.length; index += 1) {
@@ -892,6 +977,19 @@ function parseArgs(rawArgs) {
     index += 1;
   }
   return args;
+}
+
+function resolveOnUnchangedBehavior(args) {
+  const rawValue =
+    args.onUnchanged ?? (args.materializeOnSkip === "true" ? "materialize" : DEFAULT_ON_UNCHANGED);
+
+  switch (rawValue) {
+    case "skip":
+    case "materialize":
+      return rawValue;
+    default:
+      throw new Error(`Invalid --onUnchanged value "${rawValue}". Expected "skip" or "materialize".`);
+  }
 }
 
 function parsePositiveInt(value, fallback) {

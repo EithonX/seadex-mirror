@@ -30,6 +30,12 @@ npm run typecheck
 Build the frontend:
 
 ```bash
+npm run build:frontend
+```
+
+Build a deployable site snapshot:
+
+```bash
 npm run build
 ```
 
@@ -59,6 +65,13 @@ The intended flow is:
 2. write `status.json`, `catalog.json`, and `entries/<anilist-id>.json` into `frontend/public/mirror-data`
 3. build the frontend with Vite
 4. deploy the static output to Cloudflare Pages
+
+The data builder has two intentional unchanged-upstream behaviors:
+
+- `--onUnchanged=skip`
+  Use this for scheduled CI rebuilds. If the upstream probe signature matches the last deployed snapshot, the job exits without rebuilding local files or deploying again.
+- `--onUnchanged=materialize`
+  Use this for packaging or deploy builds. If upstream is unchanged but the local `frontend/public/mirror-data` folder is missing, the job reconstructs a complete local snapshot using the available cache instead of producing an empty site.
 
 The static data builder:
 
@@ -94,9 +107,9 @@ Optional GitHub secrets:
 Workflow split:
 
 - `.github/workflows/rebuild-mirror.yml`
-  Scheduled every 12 hours and manually runnable. Rebuilds `frontend/public/mirror-data`, skips deploy automatically when upstream has not changed, and supports a manual `force` input.
+  Scheduled every 12 hours and manually runnable. Uses `--onUnchanged=skip`, so it only rebuilds and deploys when upstream data actually changed. It also supports a manual `force` input.
 - `.github/workflows/deploy-site.yml`
-  Runs on `main` pushes that touch app/workflow/build files, then builds and deploys the site using the checked-in snapshot data.
+  Runs on `main` pushes that touch app/workflow/build files. Uses `--onUnchanged=materialize`, so frontend-only deploys still package a complete local snapshot even on fresh CI checkouts.
 
 Cloudflare Pages deployment note:
 

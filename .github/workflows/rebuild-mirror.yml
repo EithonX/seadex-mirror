@@ -54,16 +54,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$FORCE_REBUILD" = "true" ]; then
-            node scripts/build-static-data.mjs --force=true --report .mirror-build-report.json
+            node scripts/build-static-data.mjs --force=true --onUnchanged=skip --report .mirror-build-report.json
           else
-            node scripts/build-static-data.mjs --report .mirror-build-report.json
+            node scripts/build-static-data.mjs --onUnchanged=skip --report .mirror-build-report.json
           fi
           skipped="$(node -e "const fs=require('fs'); const report=JSON.parse(fs.readFileSync('.mirror-build-report.json','utf8')); process.stdout.write(String(Boolean(report.skipped)));")"
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
 
       - name: Build frontend
         if: steps.mirror.outputs.skipped != 'true'
-        run: npm run build
+        run: npm run build:frontend
 
       - name: Verify Cloudflare Pages access
         if: steps.mirror.outputs.skipped != 'true'

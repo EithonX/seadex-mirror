@@ -47,10 +47,10 @@ jobs:
         run: npm run typecheck
 
       - name: Build static mirror data
-        run: node scripts/build-static-data.mjs --report .mirror-build-report.json
+        run: node scripts/build-static-data.mjs --onUnchanged=materialize --report .mirror-build-report.json
 
       - name: Build frontend
-        run: npm run build
+        run: npm run build:frontend
 
       - name: Verify Cloudflare Pages access
         run: node scripts/verify-cloudflare.mjs

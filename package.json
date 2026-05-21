@@ -3,13 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "build:site": "npm run data:build && npm run build",
+    "build": "npm run build:site",
+    "build:frontend": "vite build",
+    "build:site": "npm run data:build -- --onUnchanged=materialize && npm run build:frontend",
     "data:build": "node scripts/build-static-data.mjs",
     "dev": "vite",
     "dev:pages": "wrangler pages dev dist",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name seadex",
-    "deploy:full": "npm run build:site && wrangler pages deploy dist --project-name seadex",
+    "deploy": "npm run build:site && wrangler pages deploy dist --project-name seadex",
+    "deploy:full": "npm run data:build -- --force=true --onUnchanged=materialize && npm run build:frontend && wrangler pages deploy dist --project-name seadex",
     "typecheck": "tsc -p tsconfig.frontend.json --noEmit"
   },
   "devDependencies": {
