@@ -5,9 +5,9 @@
   --bg-elevated: rgba(9, 9, 11, 0.75);
   --panel: rgba(17, 17, 19, 0.65);
   --panel-soft: rgba(25, 25, 28, 0.85);
-  --card: rgba(15, 15, 17, 0.6);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
+  --card: rgba(15, 15, 17, 0.65);
+  --line: rgba(255, 255, 255, 0.13);
+  --line-strong: rgba(255, 255, 255, 0.22);
   --text: #fafafa;
   --muted: #a1a1aa;
   --muted-strong: #d4d4d8;
@@ -42,9 +42,9 @@
   --bg-elevated: rgba(255, 255, 255, 0.85);
   --panel: rgba(255, 255, 255, 0.8);
   --panel-soft: rgba(244, 244, 245, 0.9);
-  --card: rgba(255, 255, 255, 0.7);
-  --line: rgba(9, 9, 11, 0.08);
-  --line-strong: rgba(9, 9, 11, 0.16);
+  --card: rgba(255, 255, 255, 0.75);
+  --line: rgba(9, 9, 11, 0.12);
+  --line-strong: rgba(9, 9, 11, 0.20);
   --text: #09090b;
   --muted: #71717a;
   --muted-strong: #27272a;
@@ -736,14 +736,23 @@ img {
    ========================================================================== */
 
 .catalog-table-shell {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--panel);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--shadow);
   overflow: hidden;
-  transition: border-color 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.catalog-table-shell:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme="light"] .catalog-table-shell:hover {
+  box-shadow: 0 16px 36px rgba(9, 9, 11, 0.08);
 }
 
 .catalog-table-shell__scroll {
@@ -759,12 +768,13 @@ img {
 }
 
 .catalog-table thead {
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 :root[data-theme="light"] .catalog-table thead {
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(0, 0, 0, 0.025);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .catalog-table th {
@@ -780,20 +790,29 @@ img {
 .catalog-table td {
   padding: 1rem 1.25rem;
   vertical-align: middle;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.17);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+:root[data-theme="light"] .catalog-table td {
+  border-bottom: 1px solid rgba(9, 9, 11, 0.14);
 }
 
 .catalog-row {
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.2s ease;
 }
 
 .catalog-row:hover {
-  background-color: rgba(255, 255, 255, 0.025);
+  background-color: rgba(255, 255, 255, 0.045);
 }
 
 :root[data-theme="light"] .catalog-row:hover {
-  background-color: rgba(0, 0, 0, 0.015);
+  background-color: rgba(9, 9, 11, 0.022);
+}
+
+.catalog-row:hover td {
+  border-bottom-color: var(--line-strong);
 }
 
 .catalog-row:last-child td {
@@ -955,18 +974,34 @@ img {
 
 .catalog-mobile {
   display: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .catalog-card {
   position: relative;
   padding: 1.25rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.17);
   background: transparent;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+:root[data-theme="light"] .catalog-card {
+  border-bottom: 1px solid rgba(9, 9, 11, 0.14);
 }
 
 .catalog-card:hover {
-  background-color: rgba(255, 255, 255, 0.01);
+  background-color: rgba(255, 255, 255, 0.025);
+  border-bottom-color: var(--line-strong);
+}
+
+:root[data-theme="light"] .catalog-card:hover {
+  background-color: rgba(9, 9, 11, 0.018);
 }
 
 .catalog-card:last-child {
