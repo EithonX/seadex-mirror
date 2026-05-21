@@ -127,7 +127,6 @@ img {
   top: 0;
   z-index: 50;
   width: 100%;
-  border-b: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: var(--bg-elevated);
   backdrop-filter: blur(16px);
