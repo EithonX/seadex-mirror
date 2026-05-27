@@ -398,7 +398,7 @@ async function renderSheet(status: MirrorStatus) {
         <section class="sheet-workbook">
           <div class="sheet-workbook__panel sheet-workbook__masthead">
             <div class="sheet-workbook__title-row">
-              <h1 class="sheet-workbook__title">SeaDex Sheets</h1>
+              <h1 class="sheet-workbook__title">SeaDex Sheets <span class="sheet-workbook__badge">Mirror</span></h1>
             </div>
             <div class="sheet-workbook__masthead-actions">
               <a class="sheet-workbook__upstream" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
@@ -406,7 +406,7 @@ async function renderSheet(status: MirrorStatus) {
                 Open upstream
               </a>
               <span class="sheet-workbook__credit">
-                by ${creditUrl
+                ${creditUrl
                     ? `<a href="${escapeHtml(creditUrl)}" target="_blank" rel="noreferrer">${escapeHtml(creditLabel)}</a>`
                     : `<strong>${escapeHtml(creditLabel)}</strong>`
                 }

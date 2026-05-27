@@ -2143,8 +2143,8 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.3rem 0.65rem;
+  gap: 1rem;
+  padding: 0.6rem 0.85rem;
   background: var(--sheet-panel-strong);
   border-bottom: 1px solid var(--sheet-line);
 }
@@ -2152,102 +2152,164 @@ img {
 .sheet-workbook__title-row {
   display: flex;
   align-items: center;
+  gap: 0.45rem;
   min-width: 0;
 }
 
 .sheet-workbook__title {
   margin: 0;
   color: var(--sheet-text);
-  font: 600 0.88rem/1.1 Arial, sans-serif;
+  font: 700 1.05rem/1.1 "Lexend Deca", "Roboto", -apple-system, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.sheet-workbook__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.42rem 0.08rem;
+  font: 700 0.62rem/1 "Lexend Deca", "Roboto", -apple-system, sans-serif;
+  color: var(--sheet-link);
+  background: color-mix(in srgb, var(--sheet-link) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sheet-link) 25%, transparent);
+  border-radius: 4px;
+  margin-left: 0.45rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+  transition: all 0.18s ease;
+}
+
+.sheet-workbook__badge:hover {
+  background: color-mix(in srgb, var(--sheet-link) 20%, transparent);
+  border-color: var(--sheet-link);
+  color: var(--sheet-text);
 }
 
 .sheet-workbook__masthead-actions {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.85rem;
+  flex-wrap: wrap;
 }
 
-.sheet-workbook__upstream,
-.sheet-workbook__credit {
+.sheet-workbook__upstream {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--sheet-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--sheet-muted);
-  font: 400 0.72rem/1.2 Arial, sans-serif;
+  font: 500 0.74rem/1.2 "Lexend Deca", "Roboto", -apple-system, sans-serif;
   text-decoration: none;
+  transition: all 0.18s ease;
 }
 
-.sheet-workbook__upstream:hover,
-.sheet-workbook__credit a:hover {
-  color: var(--sheet-link);
+:root[data-theme="light"] .sheet-workbook__upstream {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.sheet-workbook__upstream:hover {
+  background: color-mix(in srgb, var(--sheet-link) 12%, transparent);
+  border-color: var(--sheet-link);
+  color: var(--sheet-text);
 }
 
 .sheet-workbook__upstream svg {
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.78rem;
+  height: 0.78rem;
+  transition: transform 0.18s ease;
+}
+
+.sheet-workbook__upstream:hover svg {
+  transform: translate(1px, -1px);
+}
+
+.sheet-workbook__credit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--sheet-muted);
+  font: 400 0.74rem/1.2 Arial, sans-serif;
 }
 
 .sheet-workbook__credit a {
-  color: inherit;
+  color: var(--sheet-text);
+  font-weight: 600;
   text-decoration: none;
+  border-bottom: 1px dotted var(--sheet-muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .sheet-workbook__credit a:hover {
-  text-decoration: underline;
+  color: var(--sheet-link);
+  border-bottom-color: var(--sheet-link);
 }
 
 .sheet-workbook__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0 0.65rem 0.2rem;
+  gap: 0.8rem;
+  padding: 0.35rem 0.85rem;
   background: var(--sheet-panel);
 }
 
 .sheet-workbook__tabs {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
-  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
 .sheet-workbook__tab {
   --sheet-tab-accent: #639aff;
   display: inline-flex;
   align-items: center;
-  gap: 0.28rem;
+  gap: 0.35rem;
   min-height: auto;
-  padding: 0.2rem 0.42rem 0.16rem;
-  border-radius: 0;
+  padding: 0.35rem 0.65rem 0.3rem;
+  border-radius: var(--radius-sm);
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--sheet-muted);
-  font: 400 0.82rem/1.1 Arial, sans-serif;
-  transition: color 0.16s ease, border-color 0.16s ease;
+  font: 500 0.8rem/1.1 "Lexend Deca", "Roboto", -apple-system, sans-serif;
+  transition: all 0.18s ease;
+  cursor: pointer;
 }
 
 .sheet-workbook__tab:hover {
   color: var(--sheet-text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:root[data-theme="light"] .sheet-workbook__tab:hover {
+  background: rgba(0, 0, 0, 0.025);
 }
 
 .sheet-workbook__tab.is-active {
   color: var(--sheet-text);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.05);
   border-color: var(--sheet-link);
-  box-shadow: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+:root[data-theme="light"] .sheet-workbook__tab.is-active {
+  background: rgba(0, 0, 0, 0.035);
 }
 
 .sheet-workbook__tab-dot {
-  width: 0.38rem;
-  height: 0.38rem;
+  width: 0.42rem;
+  height: 0.42rem;
   border-radius: 999px;
   background: var(--sheet-tab-accent);
-  box-shadow: none;
+  transition: transform 0.18s ease;
+}
+
+.sheet-workbook__tab:hover .sheet-workbook__tab-dot {
+  transform: scale(1.2);
 }
 
 .sheet-workbook__toolbar-side {
@@ -2255,18 +2317,26 @@ img {
   align-items: center;
   gap: 0.8rem;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .sheet-workbook__search {
   display: inline-flex;
   align-items: center;
   gap: 0.58rem;
-  min-width: min(100%, 13rem);
-  padding: 0.22rem 0.48rem;
-  border-radius: 0;
+  width: 14rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
   border: 1px solid var(--sheet-line);
   background: var(--sheet-surface);
   color: var(--sheet-muted);
+  transition: all 0.2s ease;
+}
+
+.sheet-workbook__search:focus-within {
+  border-color: var(--sheet-link);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sheet-link) 20%, transparent);
+  color: var(--sheet-text);
 }
 
 .sheet-workbook__search svg {
@@ -2281,7 +2351,7 @@ img {
   outline: 0;
   background: transparent;
   color: var(--sheet-text);
-  font: 400 0.8rem/1.2 Arial, sans-serif;
+  font: 400 0.82rem/1.2 Arial, sans-serif;
 }
 
 .sheet-workbook__search input::placeholder {
@@ -2921,16 +2991,27 @@ img {
   .sheet-workbook__toolbar {
     flex-direction: column;
     align-items: stretch;
+    gap: 0.65rem;
   }
 
   .sheet-workbook__toolbar-side {
     width: 100%;
-    justify-content: space-between;
     margin-left: 0;
   }
 
   .sheet-workbook__masthead {
+    flex-direction: column;
     align-items: flex-start;
+    gap: 0.65rem;
+  }
+
+  .sheet-workbook__masthead-actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 0.5rem;
   }
 
   .sheet-workbook__search {
@@ -2972,23 +3053,46 @@ img {
     padding-right: 0.85rem;
   }
 
-  .sheet-workbook__masthead,
-  .sheet-workbook__toolbar,
-  .sheet-workbook__toolbar-side {
+  .sheet-workbook__masthead {
     flex-direction: column;
     align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.65rem 0.85rem;
   }
 
   .sheet-workbook__masthead-actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
     width: 100%;
-    justify-content: flex-start;
+    gap: 0.5rem;
+    margin-top: 0.1rem;
+  }
+
+  .sheet-workbook__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+    padding: 0.45rem 0.85rem 0.6rem;
+  }
+
+  .sheet-workbook__toolbar-side {
+    width: 100%;
+    margin-left: 0;
   }
 
   .sheet-workbook__tabs {
     width: 100%;
     overflow-x: auto;
     flex-wrap: nowrap;
-    padding-bottom: 0.15rem;
+    padding-bottom: 0.25rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sheet-workbook__tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .sheet-workbook__tab {
@@ -2997,6 +3101,7 @@ img {
 
   .sheet-workbook__search {
     width: 100%;
+    max-width: 100%;
   }
 
   .sheet-table {
