@@ -50,6 +50,7 @@ type LegendBlock = {
 };
 
 type TableGroup = {
+  number: number;
   ownerAddress: string;
   rows: TableRow[];
 };
@@ -127,33 +128,53 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
     ? groups.filter((group) => group.rows.some((row) => row.searchText.includes(query)))
     : groups;
   const groupedColumnIndexes = new Set(visibleColumns.slice(0, 2).map((column) => column.index));
+  const numberColumnWidth = 56;
 
-  const headerHtml = visibleColumns
-    .map((column) => {
+  const headerHtml = [
+    compactHtml(`
+      <th
+        class="sheet-table__head sheet-table__head--number"
+        scope="col"
+        style="width:${numberColumnWidth}px; min-width:${numberColumnWidth}px; max-width:${numberColumnWidth}px;"
+      >
+        <div class="sheet-cell-body"><div class="sheet-cell-text">#</div></div>
+      </th>
+    `),
+    ...visibleColumns.map((column) => {
       const headerCell = headerRow.cells.find((cell) => cell.col === column.index);
       if (!headerCell) {
         return "";
       }
 
-      return `
+      return compactHtml(`
         <th
           class="sheet-table__head sheet-style-${headerCell.styleId}${column.stickyLeft !== null ? " sheet-table__head--frozen" : ""}"
           scope="col"
           style="width:${column.widthPx}px; min-width:${column.widthPx}px; max-width:${column.widthPx}px;${column.stickyLeft !== null ? ` left:${column.stickyLeft}px;` : ""}"
         >
-          <div class="sheet-cell-body">
-            <div class="sheet-cell-text">${escapeHtml(column.label)}</div>
-          </div>
+          <div class="sheet-cell-body"><div class="sheet-cell-text">${escapeHtml(column.label)}</div></div>
         </th>
-      `;
-    })
-    .join("");
+      `);
+    }),
+  ].join("");
 
   const rowsHtml = filteredGroups.length
     ? filteredGroups
         .map((group) =>
           group.rows
             .map((row, rowOffset) => {
+              const numberCellHtml =
+                rowOffset === 0
+                  ? compactHtml(`
+                      <td
+                        class="sheet-table__cell sheet-table__cell--number"
+                        rowspan="${group.rows.length}"
+                        style="width:${numberColumnWidth}px; min-width:${numberColumnWidth}px; max-width:${numberColumnWidth}px;"
+                      >
+                        <div class="sheet-cell-body"><div class="sheet-cell-text">${group.number}</div></div>
+                      </td>
+                    `)
+                  : "";
               const cellsHtml = row.cells
                 .map((cell) => {
                   const shouldGroupCell =
@@ -176,7 +197,7 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
                     shouldGroupCell ? "sheet-table__cell--grouped" : "",
                   ].filter(Boolean);
 
-                  return `
+                  return compactHtml(`
                     <td
                       class="${classes.join(" ")}"
                       data-sheet-cell="${escapeHtml(cell.address)}"
@@ -185,23 +206,24 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
                     >
                       ${renderTableCellBody(cell)}
                     </td>
-                  `;
+                  `);
                 })
                 .join("");
 
-              return `<tr class="sheet-table__row">${cellsHtml}</tr>`;
+              return `<tr class="sheet-table__row">${numberCellHtml}${cellsHtml}</tr>`;
             })
             .join(""),
         )
         .join("")
-    : `<tr><td class="sheet-table__empty" colspan="${visibleColumns.length}">No rows matched that filter.</td></tr>`;
+    : `<tr><td class="sheet-table__empty" colspan="${visibleColumns.length + 1}">No rows matched that filter.</td></tr>`;
 
-  const colgroupHtml = visibleColumns
-    .map((column) => `<col style="width:${column.widthPx}px" data-sheet-column="${escapeHtml(column.letter)}" />`)
-    .join("");
+  const colgroupHtml = [
+    `<col style="width:${numberColumnWidth}px" data-sheet-column="number" />`,
+    ...visibleColumns.map((column) => `<col style="width:${column.widthPx}px" data-sheet-column="${escapeHtml(column.letter)}" />`),
+  ].join("");
 
   return {
-    html: `
+    html: compactHtml(`
       <div class="sheet-table-shell">
         <div class="sheet-table-scroll">
           <table class="sheet-table" aria-label="${escapeHtml(sheet.name)} sheet">
@@ -211,7 +233,7 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
           </table>
         </div>
       </div>
-    `,
+    `),
     matchCount: filteredGroups.reduce((sum, group) => sum + group.rows.length, 0),
     firstMatchAddress: filteredGroups[0]?.rows[0]?.cells[0]?.address ?? null,
   };
@@ -243,18 +265,18 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
       matchCount += 1;
       firstMatchAddress ||= note.bodyCell?.address ?? note.numberCell?.address ?? null;
 
-      return `
-        <div class="sheet-note-card">
-          <div class="sheet-note-card__number${note.numberCell ? ` sheet-style-${note.numberCell.styleId}` : ""}">
+      return compactHtml(`
+        <tr class="sheet-notes-table__row">
+          <td class="sheet-notes-table__number${note.numberCell ? ` sheet-style-${note.numberCell.styleId}` : ""}">
             ${note.numberCell ? renderPlainCellMarkup(note.numberCell) : ""}
-          </div>
-          <div class="sheet-note-card__body${note.bodyCell ? ` sheet-style-${note.bodyCell.styleId}` : ""}"${
+          </td>
+          <td class="sheet-notes-table__body${note.bodyCell ? ` sheet-style-${note.bodyCell.styleId}` : ""}"${
             note.bodyCell ? ` data-sheet-cell="${escapeHtml(note.bodyCell.address)}"` : ""
           }>
             ${note.bodyCell ? renderCellBody(note.bodyCell) : ""}
-          </div>
-        </div>
-      `;
+          </td>
+        </tr>
+      `);
     })
     .join("");
 
@@ -263,18 +285,18 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
       matchCount += 1;
       firstMatchAddress ||= item.bodyCell?.address ?? item.labelCell?.address ?? null;
 
-      return `
-        <div class="sheet-legend-card">
-          <div class="sheet-legend-card__header${item.labelCell ? ` sheet-style-${item.labelCell.styleId}` : ""}">
+      return compactHtml(`
+        <tr class="sheet-legend-table__row">
+          <td class="sheet-legend-table__label${item.labelCell ? ` sheet-style-${item.labelCell.styleId}` : ""}">
             ${item.labelCell ? renderPlainCellMarkup(item.labelCell) : ""}
-          </div>
-          <div class="sheet-legend-card__body${item.bodyCell ? ` sheet-style-${item.bodyCell.styleId}` : ""}"${
+          </td>
+          <td class="sheet-legend-table__body${item.bodyCell ? ` sheet-style-${item.bodyCell.styleId}` : ""}"${
             item.bodyCell ? ` data-sheet-cell="${escapeHtml(item.bodyCell.address)}"` : ""
           }>
             ${item.bodyCell ? renderCellBody(item.bodyCell) : ""}
-          </div>
-        </div>
-      `;
+          </td>
+        </tr>
+      `);
     })
     .join("");
 
@@ -284,24 +306,44 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
       : "";
 
   return {
-    html: `
-      <div class="sheet-notes">
+    html: compactHtml(`
+      <div class="sheet-notes-sheet">
         <section class="sheet-notes-section">
-          <h2 class="sheet-notes-section__title${titleCell ? ` sheet-style-${titleCell.styleId}` : ""}">${escapeHtml(title)}</h2>
-          <div class="sheet-notes-list">
-            ${notesHtml}
-          </div>
+          <table class="sheet-notes-table" aria-label="${escapeHtml(title)}">
+            <colgroup>
+              <col class="sheet-notes-table__number-col" />
+              <col class="sheet-notes-table__body-col" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="sheet-notes-table__title${titleCell ? ` sheet-style-${titleCell.styleId}` : ""}" colspan="2">${escapeHtml(title)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${notesHtml}
+            </tbody>
+          </table>
         </section>
 
         <section class="sheet-notes-section">
-          <h2 class="sheet-notes-section__title${legendTitleCell ? ` sheet-style-${legendTitleCell.styleId}` : ""}">${escapeHtml(legendTitle)}</h2>
-          <div class="sheet-legend-grid">
-            ${legendHtml}
-          </div>
+          <table class="sheet-legend-table" aria-label="${escapeHtml(legendTitle)}">
+            <colgroup>
+              <col class="sheet-legend-table__label-col" />
+              <col class="sheet-legend-table__body-col" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="sheet-legend-table__title${legendTitleCell ? ` sheet-style-${legendTitleCell.styleId}` : ""}" colspan="2">${escapeHtml(legendTitle)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${legendHtml}
+            </tbody>
+          </table>
         </section>
         ${emptyState}
       </div>
-    `,
+    `),
     matchCount,
     firstMatchAddress,
   };
@@ -387,6 +429,7 @@ function buildTableGroups(rows: TableRow[]): TableGroup[] {
     }
 
     groups.push({
+      number: groups.length + 1,
       ownerAddress,
       rows: [row],
     });
@@ -436,7 +479,7 @@ function getPreferredColumnWidth(key: string, rawWidth: number | null | undefine
     case "notes":
       return 560;
     case "comparisons":
-      return 132;
+      return 280;
     case "updated":
       return 116;
     default:
@@ -549,11 +592,7 @@ function renderDualAudioCell(cell: TableCell) {
     return `<div class="sheet-cell-body"><span class="sheet-cell-muted">-</span></div>`;
   }
 
-  return `
-    <div class="sheet-cell-body">
-      <div class="sheet-cell-text">${values.map((value) => escapeHtml(value)).join(" / ")}</div>
-    </div>
-  `;
+  return `<div class="sheet-cell-body"><div class="sheet-cell-text">${values.map((value) => escapeHtml(value)).join(" / ")}</div></div>`;
 }
 
 function renderComparisonCell(cell: TableCell) {
@@ -562,21 +601,18 @@ function renderComparisonCell(cell: TableCell) {
     return `<div class="sheet-cell-body"><span class="sheet-cell-muted">-</span></div>`;
   }
 
-  return `
+  return compactHtml(`
     <div class="sheet-cell-body">
       <div class="sheet-links">
         ${urls
           .map(
-            (url) => `
-              <a class="sheet-links__item" href="${escapeHtml(url)}" target="_blank" rel="noreferrer" title="${escapeHtml(url)}">
-                ${trimDisplayUrl(url, 40)}
-              </a>
-            `,
+            (url) =>
+              `<a class="sheet-links__item" href="${escapeHtml(url)}" target="_blank" rel="noreferrer" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`,
           )
           .join("")}
       </div>
     </div>
-  `;
+  `);
 }
 
 function renderUpdatedCell(cell: TableCell) {
@@ -592,11 +628,7 @@ function renderCellBody(cell: SheetWorkbookCell) {
     return `<div class="sheet-cell-body"><span class="sheet-cell-muted">-</span></div>`;
   }
 
-  return `
-    <div class="sheet-cell-body" data-sheet-cell="${escapeHtml(cell.address)}">
-      <div class="sheet-cell-text">${html}</div>
-    </div>
-  `;
+  return `<div class="sheet-cell-body" data-sheet-cell="${escapeHtml(cell.address)}"><div class="sheet-cell-text">${html}</div></div>`;
 }
 
 function renderPlainCellMarkup(cell: SheetWorkbookCell) {
@@ -614,15 +646,20 @@ function renderCellText(cell: SheetWorkbookCell) {
 
 function renderRichText(richText: SheetWorkbookRichTextRun[], hyperlink: string | null) {
   const fullText = richText.map((run) => run.text).join("");
+  const hasRunLevelHyperlinks = richText.some((run) => Boolean(run.hyperlink));
   const rendered = richText
     .map((run) => {
       const style = renderInlineRichTextStyle(run);
+      if (run.hyperlink) {
+        return `<a class="sheet-link" href="${escapeHtml(run.hyperlink)}" target="_blank" rel="noreferrer"${style ? ` style="${style}"` : ""}>${escapeHtml(run.text).replace(/\n/g, "<br />")}</a>`;
+      }
+
       const linked = renderAutoLinkedText(run.text, style);
-      return linked || `<span${style ? ` style="${style}"` : ""}>${escapeHtml(run.text)}</span>`;
+      return linked || `<span${style ? ` style="${style}"` : ""}>${escapeHtml(run.text).replace(/\n/g, "<br />")}</span>`;
     })
     .join("");
 
-  if (hyperlink && !URL_PATTERN.test(fullText)) {
+  if (hyperlink && !hasRunLevelHyperlinks && !URL_PATTERN.test(fullText)) {
     URL_PATTERN.lastIndex = 0;
     return `<a class="sheet-link" href="${escapeHtml(hyperlink)}" target="_blank" rel="noreferrer">${rendered}</a>`;
   }
@@ -839,13 +876,6 @@ function extractUrls(value: string) {
   return matches ? [...new Set(matches)] : [];
 }
 
-function trimDisplayUrl(url: string, limit: number) {
-  if (url.length <= limit) {
-    return escapeHtml(url);
-  }
-  return `${escapeHtml(url.slice(0, limit - 1))}...`;
-}
-
 function renderSheetFontFamily(name: string) {
   if (name === "Roboto") {
     return `"Roboto","Helvetica Neue",Arial,sans-serif`;
@@ -862,6 +892,10 @@ function renderSheetFontFamily(name: string) {
 function toSheetColumnPixels(width: number | null | undefined) {
   const source = typeof width === "number" && Number.isFinite(width) ? width : 12.63;
   return Math.max(44, Math.round(source * 7 + 5));
+}
+
+function compactHtml(value: string) {
+  return value.replace(/>\s+</g, "><").trim();
 }
 
 function escapeHtml(value: string) {

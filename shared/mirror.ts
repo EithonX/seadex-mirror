@@ -117,6 +117,7 @@ export type SheetWorkbookRichTextRun = {
   color?: string | null;
   fontName?: string | null;
   fontSize?: number | null;
+  hyperlink?: string | null;
 };
 
 export type SheetWorkbookBorderStyle = {

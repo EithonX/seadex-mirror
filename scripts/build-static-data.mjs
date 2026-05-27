@@ -605,10 +605,11 @@ async function fetchSheetWorkbookSnapshot(sheetWorkbookUrl) {
   const workbookBuffer = Buffer.from(await response.arrayBuffer());
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(workbookBuffer);
-  return serializeSheetWorkbook(workbook);
+  const publishedRichTextLinks = await fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook);
+  return serializeSheetWorkbook(workbook, publishedRichTextLinks);
 }
 
-function serializeSheetWorkbook(workbook) {
+function serializeSheetWorkbook(workbook, publishedRichTextLinks = new Map()) {
   const themeColors = readWorkbookThemeColors(workbook);
   const styleRegistry = new Map();
   const styles = [];
@@ -626,6 +627,7 @@ function serializeSheetWorkbook(workbook) {
         styleRegistry,
         styles,
         media,
+        publishedRichTextLinks,
       }),
     ),
   };
@@ -707,7 +709,8 @@ function serializeWorkbookCell(cell, sheetName, context) {
     context.styleRegistry,
     context.styles,
   );
-  const value = serializeWorkbookCellValue(cell);
+  const publishedCellLinks = context.publishedRichTextLinks.get(sheetName)?.get(cell.address) ?? null;
+  const value = serializeWorkbookCellValue(cell, publishedCellLinks);
   const redacted = shouldRedactWorkbookCredit(sheetName, value.display);
 
   return {
@@ -720,7 +723,7 @@ function serializeWorkbookCell(cell, sheetName, context) {
   };
 }
 
-function serializeWorkbookCellValue(cell) {
+function serializeWorkbookCellValue(cell, publishedCellLinks = null) {
   const value = cell.value;
 
   if (value === null || value === undefined) {
@@ -752,9 +755,10 @@ function serializeWorkbookCellValue(cell) {
         : null;
 
   if (richText) {
+    const linkedRichText = applyPublishedCellLinksToRichText(richText, publishedCellLinks);
     return {
-      display: richText.map((entry) => entry.text).join(""),
-      richText,
+      display: linkedRichText.map((entry) => entry.text).join(""),
+      richText: linkedRichText,
       ...(hyperlink ? { hyperlink } : {}),
     };
   }
@@ -828,6 +832,255 @@ function normalizeWorkbookCellStyle(style, themeColors) {
     borderBottom: normalizeWorkbookBorder(style.border?.bottom, themeColors),
     borderLeft: normalizeWorkbookBorder(style.border?.left, themeColors),
   });
+}
+
+async function fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook) {
+  const googleSheetId = extractGoogleSheetId(sheetWorkbookUrl);
+  if (!googleSheetId) {
+    return new Map();
+  }
+
+  try {
+    const htmlViewUrl = `https://docs.google.com/spreadsheets/d/${googleSheetId}/htmlview`;
+    const response = await fetch(htmlViewUrl);
+    if (!response.ok) {
+      return new Map();
+    }
+
+    const html = await response.text();
+    const publishedSheets = parsePublishedSheetTabs(html);
+    if (publishedSheets.length === 0) {
+      return new Map();
+    }
+
+    const workbookSheetNames = new Set(workbook.worksheets.map((sheet) => sheet.name));
+    const richTextLinksBySheet = new Map();
+
+    for (const publishedSheet of publishedSheets) {
+      if (!workbookSheetNames.has(publishedSheet.name)) {
+        continue;
+      }
+
+      const publishedSheetUrl = `https://docs.google.com/spreadsheets/d/${googleSheetId}/htmlview/sheet?headers=true&gid=${publishedSheet.gid}`;
+      const publishedSheetResponse = await fetch(publishedSheetUrl);
+      if (!publishedSheetResponse.ok) {
+        continue;
+      }
+
+      const publishedSheetHtml = await publishedSheetResponse.text();
+      richTextLinksBySheet.set(publishedSheet.name, parsePublishedSheetCellLinks(publishedSheetHtml));
+    }
+
+    return richTextLinksBySheet;
+  } catch {
+    return new Map();
+  }
+}
+
+function extractGoogleSheetId(sheetWorkbookUrl) {
+  const match = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(String(sheetWorkbookUrl ?? ""));
+  return match?.[1] ?? null;
+}
+
+function parsePublishedSheetTabs(html) {
+  const tabs = [];
+  const pattern = /items\.push\(\{name:\s*"([^"]+)",[\s\S]*?gid:\s*"([^"]+)"/g;
+  let match;
+
+  while ((match = pattern.exec(html))) {
+    tabs.push({
+      name: decodeJsEscapes(match[1]),
+      gid: decodeJsEscapes(match[2]),
+    });
+  }
+
+  return tabs;
+}
+
+function parsePublishedSheetCellLinks(html) {
+  const rows = new Map();
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/g;
+  let rowMatch;
+
+  while ((rowMatch = rowPattern.exec(html))) {
+    const rowHtml = rowMatch[1];
+    const rowNumber = extractPublishedRowNumber(rowHtml);
+    if (!rowNumber) {
+      continue;
+    }
+
+    const cells = new Map();
+    const cellPattern = /<td\b([^>]*)>([\s\S]*?)<\/td>/g;
+    let cellMatch;
+    let columnIndex = 1;
+
+    while ((cellMatch = cellPattern.exec(rowHtml))) {
+      const attributes = cellMatch[1];
+      const innerHtml = cellMatch[2];
+      const links = extractPublishedLinks(innerHtml);
+      if (links.length > 0) {
+        cells.set(columnNumberToLetter(columnIndex) + rowNumber, links);
+      }
+
+      const colspan = Number.parseInt(/colspan="(\d+)"/.exec(attributes)?.[1] ?? "1", 10);
+      columnIndex += Number.isFinite(colspan) && colspan > 0 ? colspan : 1;
+    }
+
+    if (cells.size > 0) {
+      rows.set(rowNumber, cells);
+    }
+  }
+
+  const linksByAddress = new Map();
+  for (const cells of rows.values()) {
+    for (const [address, links] of cells) {
+      linksByAddress.set(address, links);
+    }
+  }
+  return linksByAddress;
+}
+
+function extractPublishedRowNumber(rowHtml) {
+  const headerMatch = rowHtml.match(/<th\b[^>]*class="row-headers-background"[^>]*>[\s\S]*?<div[^>]*>(.*?)<\/div>[\s\S]*?<\/th>/);
+  if (!headerMatch) {
+    return null;
+  }
+
+  const rowText = decodeHtmlEntities(stripHtmlTags(headerMatch[1])).trim();
+  const rowNumber = Number.parseInt(rowText, 10);
+  return Number.isFinite(rowNumber) && rowNumber > 0 ? rowNumber : null;
+}
+
+function extractPublishedLinks(html) {
+  const links = [];
+  const pattern = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  let match;
+
+  while ((match = pattern.exec(html))) {
+    const text = decodeHtmlEntities(stripHtmlTags(match[2])).replace(/\s+/g, " ").trim();
+    if (!text) {
+      continue;
+    }
+
+    const href = unwrapGoogleRedirectHref(decodeHtmlEntities(match[1]));
+    if (!href) {
+      continue;
+    }
+
+    links.push({ text, href });
+  }
+
+  return links;
+}
+
+function unwrapGoogleRedirectHref(href) {
+  try {
+    const url = new URL(href);
+    if (url.hostname === "www.google.com" && url.pathname === "/url") {
+      const target = url.searchParams.get("q");
+      return target ? target : href;
+    }
+    return href;
+  } catch {
+    return href;
+  }
+}
+
+function applyPublishedCellLinksToRichText(richText, publishedCellLinks) {
+  if (!Array.isArray(publishedCellLinks) || publishedCellLinks.length === 0) {
+    return richText;
+  }
+
+  const fullText = richText.map((run) => run.text).join("");
+  const linkRanges = [];
+  let searchStart = 0;
+
+  for (const link of publishedCellLinks) {
+    if (!link.text) {
+      continue;
+    }
+
+    const start = fullText.indexOf(link.text, searchStart);
+    if (start === -1) {
+      continue;
+    }
+
+    linkRanges.push({
+      start,
+      end: start + link.text.length,
+      href: link.href,
+    });
+    searchStart = start + link.text.length;
+  }
+
+  if (linkRanges.length === 0) {
+    return richText;
+  }
+
+  const normalizedRuns = [];
+  let globalOffset = 0;
+  let activeRangeIndex = 0;
+
+  for (const run of richText) {
+    let localOffset = 0;
+    while (localOffset < run.text.length) {
+      const currentRange = linkRanges[activeRangeIndex] ?? null;
+      const absoluteOffset = globalOffset + localOffset;
+
+      if (!currentRange || absoluteOffset < currentRange.start) {
+        const nextBoundary = currentRange ? Math.min(run.text.length, localOffset + (currentRange.start - absoluteOffset)) : run.text.length;
+        normalizedRuns.push({
+          ...run,
+          text: run.text.slice(localOffset, nextBoundary),
+        });
+        localOffset = nextBoundary;
+        continue;
+      }
+
+      const sliceEnd = Math.min(run.text.length, localOffset + (currentRange.end - absoluteOffset));
+      normalizedRuns.push({
+        ...run,
+        text: run.text.slice(localOffset, sliceEnd),
+        hyperlink: currentRange.href,
+      });
+      localOffset = sliceEnd;
+
+      if (globalOffset + localOffset >= currentRange.end) {
+        activeRangeIndex += 1;
+      }
+    }
+
+    globalOffset += run.text.length;
+  }
+
+  return normalizedRuns.filter((run) => run.text.length > 0);
+}
+
+function decodeJsEscapes(value) {
+  return String(value ?? "")
+    .replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\u([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\\//g, "/")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
+}
+
+function stripHtmlTags(value) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
+}
+
+function decodeHtmlEntities(value) {
+  return String(value ?? "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 10)))
+    .replace(/&#x([0-9A-Fa-f]+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
 }
 
 function normalizeWorkbookBorder(border, themeColors) {
