@@ -10,6 +10,14 @@ import {
 
 const URL_PATTERN = /(https?:\/\/[^\s<]+)/g;
 
+const HYPERLINK_COLORS = new Set([
+  "#0000ff",
+  "#1155cc",
+  "#0563c1",
+  "#0000ee",
+  "#0066cc",
+]);
+
 type VisibleColumn = {
   index: number;
   letter: string;
@@ -723,17 +731,22 @@ function renderInlineRichTextStyle(run: SheetWorkbookRichTextRun) {
   if (run.italic) {
     declarations.push("font-style:italic");
   }
+
+  const isLinkColor = run.color && HYPERLINK_COLORS.has(run.color.toLowerCase());
+
   if (run.underline || run.strike) {
     const lines = [];
-    if (run.underline) {
+    if (run.underline && !isLinkColor) {
       lines.push("underline");
     }
     if (run.strike) {
       lines.push("line-through");
     }
-    declarations.push(`text-decoration-line:${lines.join(" ")}`);
+    if (lines.length > 0) {
+      declarations.push(`text-decoration-line:${lines.join(" ")}`);
+    }
   }
-  if (run.color) {
+  if (run.color && !isLinkColor) {
     declarations.push(`color:${run.color}`);
   }
   if (run.fontName) {
@@ -759,15 +772,20 @@ function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle, isDa
   if (style.italic) {
     declarations.push("font-style:italic");
   }
+
+  const isLinkColor = style.textColor && HYPERLINK_COLORS.has(style.textColor.toLowerCase());
+
   if (style.underline || style.strike) {
     const lines = [];
-    if (style.underline) {
+    if (style.underline && !isLinkColor) {
       lines.push("underline");
     }
     if (style.strike) {
       lines.push("line-through");
     }
-    declarations.push(`text-decoration-line:${lines.join(" ")}`);
+    if (lines.length > 0) {
+      declarations.push(`text-decoration-line:${lines.join(" ")}`);
+    }
   }
 
   const hasBg = style.backgroundColor && style.backgroundColor.toLowerCase() !== "#ffffff";
@@ -786,7 +804,7 @@ function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle, isDa
       declarations.push(`color:var(--sheet-text) !important`);
     } else {
       // No bg set
-      if (style.textColor && style.textColor.toLowerCase() !== "#000000") {
+      if (style.textColor && !isLinkColor && style.textColor.toLowerCase() !== "#000000") {
         declarations.push(`color:${style.textColor} !important`);
       } else if (style.textColor) {
         declarations.push(`color:var(--sheet-text) !important`);
@@ -794,7 +812,7 @@ function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle, isDa
     }
   } else {
     // Light mode: render as-is
-    if (style.textColor) {
+    if (style.textColor && !isLinkColor) {
       declarations.push(`color:${style.textColor} !important`);
     }
     if (style.backgroundColor) {
