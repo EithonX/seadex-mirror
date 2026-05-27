@@ -18,5 +18,8 @@
     "typescript": "latest",
     "vite": "^7.2.1",
     "wrangler": "^4.93.0"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
   }
 }

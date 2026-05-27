@@ -1,8 +1,11 @@
 import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import ExcelJS from "exceljs";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
+const DEFAULT_SHEET_WORKBOOK_URL =
+  "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/export?format=xlsx";
 const DEFAULT_SOURCE_PAGE_SIZE = 100;
 const DEFAULT_SOURCE_PROBE_SIZE = 8;
 const DEFAULT_ANILIST_BATCH_SIZE = 50;
@@ -84,6 +87,8 @@ async function main() {
   const anilistClientId = args.anilistClientId ?? process.env.ANILIST_CLIENT_ID ?? "";
   const anilistClientSecret = args.anilistClientSecret ?? process.env.ANILIST_CLIENT_SECRET ?? "";
   const statusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
+  const sheetWorkbookUrl =
+    args.sheetWorkbookUrl ?? process.env.SHEET_WORKBOOK_URL ?? DEFAULT_SHEET_WORKBOOK_URL;
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
   const reportPath = args.report ? resolve(args.report) : "";
   const force = args.force === "true";
@@ -157,6 +162,10 @@ async function main() {
   );
   logStep(`Resolved AniList metadata for ${anilistMedia.size} entries.`);
 
+  logStep("Fetching published SeaDex sheet workbook...");
+  const sheetWorkbook = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl);
+  logStep(`Workbook snapshot ready with ${sheetWorkbook.sheets.length} tab(s).`);
+
   const finishedAt = new Date().toISOString();
   logStep("Composing static snapshot payloads...");
   const snapshot = buildStaticSnapshot({
@@ -166,6 +175,7 @@ async function main() {
     listIds,
     entries: sourceSnapshot.entries,
     anilistMedia,
+    sheetWorkbook,
     sourceProbe,
     probeSignature,
   });
@@ -189,6 +199,7 @@ async function main() {
     entryFiles: snapshot.catalog.items.length,
     torrents: snapshot.status.counts.torrents,
     anilistMedia: snapshot.status.counts.anilistMedia,
+    sheetTabs: snapshot.sheetWorkbook.sheets.length,
   };
   await writeOptionalReport(reportPath, report);
   console.log(JSON.stringify(report, null, 2));
@@ -199,19 +210,22 @@ async function loadLocalSnapshot(outputDir) {
     const statusPath = join(outputDir, "status.json");
     const catalogPath = join(outputDir, "catalog.json");
     const sheetPath = join(outputDir, "sheet.json");
+    const sheetWorkbookPath = join(outputDir, "sheet-workbook.json");
     const cachePath = join(outputDir, "anilist-cache.json");
     const entriesDir = join(outputDir, "entries");
 
     await access(statusPath);
     await access(catalogPath);
     await access(sheetPath);
+    await access(sheetWorkbookPath);
     await access(cachePath);
     await access(entriesDir);
 
-    const [statusText, _catalogText, _sheetText, cacheText, entryFiles] = await Promise.all([
+    const [statusText, _catalogText, _sheetText, workbookText, cacheText, entryFiles] = await Promise.all([
       readFile(statusPath, "utf8"),
       readFile(catalogPath, "utf8"),
       readFile(sheetPath, "utf8"),
+      readFile(sheetWorkbookPath, "utf8"),
       readFile(cachePath, "utf8"),
       readdir(entriesDir),
     ]);
@@ -219,6 +233,7 @@ async function loadLocalSnapshot(outputDir) {
     const status = JSON.parse(statusText);
     JSON.parse(_catalogText);
     JSON.parse(_sheetText);
+    JSON.parse(workbookText);
     const cachePayload = JSON.parse(cacheText);
     const expectedEntries = status?.counts?.entries;
     const actualEntryFiles = entryFiles.filter((file) => file.endsWith(".json")).length;
@@ -331,6 +346,7 @@ async function writeSnapshot(outputDir, snapshot) {
   await writeJson(join(stagedDir, "status.json"), snapshot.status);
   await writeJson(join(stagedDir, "catalog.json"), snapshot.catalog);
   await writeJson(join(stagedDir, "sheet.json"), snapshot.sheet);
+  await writeJson(join(stagedDir, "sheet-workbook.json"), snapshot.sheetWorkbook);
   await writeJson(join(stagedDir, "anilist-cache.json"), {
     generatedAt: snapshot.status.sync.lastRebuildFinishedAt,
     items: [...snapshot.anilistCache.values()],
@@ -569,9 +585,495 @@ function buildStaticSnapshot(snapshot) {
         );
       }),
     },
+    sheetWorkbook: snapshot.sheetWorkbook,
     anilistCache: snapshot.anilistMedia,
     entries: entryPayloads,
   };
+}
+
+async function fetchSheetWorkbookSnapshot(sheetWorkbookUrl) {
+  const response = await fetch(sheetWorkbookUrl, {
+    headers: {
+      accept:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream;q=0.9,*/*;q=0.8",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Sheet workbook request failed with ${response.status} ${response.statusText}.`);
+  }
+
+  const workbookBuffer = Buffer.from(await response.arrayBuffer());
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(workbookBuffer);
+  return serializeSheetWorkbook(workbook);
+}
+
+function serializeSheetWorkbook(workbook) {
+  const themeColors = readWorkbookThemeColors(workbook);
+  const styleRegistry = new Map();
+  const styles = [];
+  const media = serializeWorkbookMedia(workbook);
+  const credit = extractWorkbookCredit(workbook);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    credit,
+    styles,
+    media,
+    sheets: workbook.worksheets.map((sheet) =>
+      serializeWorkbookSheet(sheet, {
+        themeColors,
+        styleRegistry,
+        styles,
+        media,
+      }),
+    ),
+  };
+}
+
+function serializeWorkbookMedia(workbook) {
+  return (workbook.model.media ?? [])
+    .filter((item) => item?.type === "image" && item.buffer)
+    .map((item, index) => ({
+      id: `media-${index}`,
+      mimeType: resolveWorkbookImageMimeType(item.extension),
+      dataUrl: `data:${resolveWorkbookImageMimeType(item.extension)};base64,${Buffer.from(item.buffer).toString("base64")}`,
+    }));
+}
+
+function serializeWorkbookSheet(sheet, context) {
+  const visibleColumns = [];
+  for (let columnIndex = 1; columnIndex <= sheet.columnCount; columnIndex += 1) {
+    const column = sheet.getColumn(columnIndex);
+    if (column.hidden) {
+      continue;
+    }
+
+    visibleColumns.push({
+      index: columnIndex,
+      letter: columnNumberToLetter(columnIndex),
+      width: sanitizeWorkbookNumber(column.width),
+      hidden: false,
+      outlineLevel: column.outlineLevel ?? 0,
+    });
+  }
+
+  const visibleColumnIndexes = new Set(visibleColumns.map((column) => column.index));
+  const rows = [];
+  for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex += 1) {
+    const row = sheet.getRow(rowIndex);
+    rows.push({
+      index: rowIndex,
+      height: sanitizeWorkbookNumber(row.height),
+      hidden: row.hidden === true ? true : undefined,
+      outlineLevel: row.outlineLevel ?? 0,
+      cells: visibleColumns.map((column) =>
+        serializeWorkbookCell(row.getCell(column.index), sheet.name, context),
+      ),
+    });
+  }
+
+  const merges = (sheet.model.merges ?? [])
+    .map(parseWorkbookRange)
+    .filter(Boolean)
+    .map((merge) => clipVisibleMerge(merge, visibleColumnIndexes))
+    .filter(Boolean);
+
+  const images = (sheet.getImages?.() ?? [])
+    .map((image) => serializeWorkbookImage(image, context.media))
+    .filter(Boolean);
+
+  return {
+    id: sheet.id,
+    name: sheet.name,
+    slug: slugifySheetName(sheet.name),
+    tabColor: resolveWorkbookColor(sheet.properties.tabColor, context.themeColors),
+    rowCount: sheet.rowCount,
+    columnCount: visibleColumns.length,
+    defaultRowHeight: sanitizeWorkbookNumber(sheet.properties.defaultRowHeight),
+    defaultColumnWidth: sanitizeWorkbookNumber(sheet.properties.defaultColWidth),
+    frozenRows: Math.max(0, Math.trunc(sheet.views?.[0]?.ySplit ?? 0)),
+    frozenColumns: Math.max(0, Math.trunc(sheet.views?.[0]?.xSplit ?? 0)),
+    columns: visibleColumns,
+    rows,
+    merges,
+    images,
+  };
+}
+
+function serializeWorkbookCell(cell, sheetName, context) {
+  const styleId = internWorkbookStyle(
+    normalizeWorkbookCellStyle(cell.style ?? {}, context.themeColors),
+    context.styleRegistry,
+    context.styles,
+  );
+  const value = serializeWorkbookCellValue(cell);
+  const redacted = shouldRedactWorkbookCredit(sheetName, value.display);
+
+  return {
+    col: cell.col,
+    address: cell.address,
+    display: redacted ? "" : value.display,
+    styleId,
+    ...(redacted ? {} : value.richText ? { richText: value.richText } : {}),
+    ...(redacted ? {} : value.hyperlink ? { hyperlink: value.hyperlink } : {}),
+  };
+}
+
+function serializeWorkbookCellValue(cell) {
+  const value = cell.value;
+
+  if (value === null || value === undefined) {
+    return { display: "" };
+  }
+
+  if (value instanceof Date) {
+    return { display: formatWorkbookDate(value) };
+  }
+
+  if (typeof value === "string") {
+    return { display: value };
+  }
+
+  if (typeof value === "number") {
+    return { display: Number.isFinite(value) ? String(value) : "" };
+  }
+
+  if (typeof value === "boolean") {
+    return { display: value ? "TRUE" : "FALSE" };
+  }
+
+  const hyperlink = typeof value?.hyperlink === "string" ? value.hyperlink : null;
+  const richText =
+    Array.isArray(value?.richText)
+      ? serializeWorkbookRichText(value.richText)
+      : Array.isArray(value?.text?.richText)
+        ? serializeWorkbookRichText(value.text.richText)
+        : null;
+
+  if (richText) {
+    return {
+      display: richText.map((entry) => entry.text).join(""),
+      richText,
+      ...(hyperlink ? { hyperlink } : {}),
+    };
+  }
+
+  if (typeof value?.text === "string") {
+    return {
+      display: value.text,
+      ...(hyperlink ? { hyperlink } : {}),
+    };
+  }
+
+  if ("result" in Object(value) && value.result !== null && value.result !== undefined) {
+    if (value.result instanceof Date) {
+      return { display: formatWorkbookDate(value.result) };
+    }
+    return { display: String(value.result) };
+  }
+
+  const fallbackText = safeWorkbookCellText(cell);
+  return {
+    display: fallbackText,
+    ...(hyperlink ? { hyperlink } : {}),
+  };
+}
+
+function safeWorkbookCellText(cell) {
+  try {
+    return typeof cell.text === "string" ? cell.text : "";
+  } catch {
+    return "";
+  }
+}
+
+function serializeWorkbookRichText(richText) {
+  return richText
+    .map((run) => ({
+      text: String(run.text ?? ""),
+      ...(run.font?.bold ? { bold: true } : {}),
+      ...(run.font?.italic ? { italic: true } : {}),
+      ...(run.font?.underline ? { underline: true } : {}),
+      ...(run.font?.strike ? { strike: true } : {}),
+      ...(run.font?.name ? { fontName: run.font.name } : {}),
+      ...(Number.isFinite(run.font?.size) ? { fontSize: run.font.size } : {}),
+      ...(run.font?.color ? { color: resolveWorkbookColor(run.font.color, null) } : {}),
+    }))
+    .filter((run) => run.text.length > 0);
+}
+
+function normalizeWorkbookCellStyle(style, themeColors) {
+  const font = style.font ?? {};
+  const alignment = style.alignment ?? {};
+  const fillColor =
+    style.fill?.pattern === "solid"
+      ? resolveWorkbookColor(style.fill.fgColor ?? style.fill.bgColor, themeColors)
+      : null;
+
+  return stripUndefined({
+    fontName: normalizeWorkbookFontName(font.name),
+    fontSize: sanitizeWorkbookNumber(font.size),
+    fontWeight: font.bold ? 700 : null,
+    italic: font.italic === true ? true : undefined,
+    underline: font.underline ? true : undefined,
+    strike: font.strike === true ? true : undefined,
+    textColor: resolveWorkbookColor(font.color, themeColors),
+    backgroundColor: fillColor,
+    horizontalAlign: alignment.horizontal ?? null,
+    verticalAlign: alignment.vertical ?? null,
+    wrap: alignment.wrapText === true ? true : undefined,
+    borderTop: normalizeWorkbookBorder(style.border?.top, themeColors),
+    borderRight: normalizeWorkbookBorder(style.border?.right, themeColors),
+    borderBottom: normalizeWorkbookBorder(style.border?.bottom, themeColors),
+    borderLeft: normalizeWorkbookBorder(style.border?.left, themeColors),
+  });
+}
+
+function normalizeWorkbookBorder(border, themeColors) {
+  if (!border?.style) {
+    return null;
+  }
+
+  return stripUndefined({
+    style: border.style,
+    color: resolveWorkbookColor(border.color, themeColors),
+  });
+}
+
+function internWorkbookStyle(style, registry, styles) {
+  const key = JSON.stringify(style);
+  const existing = registry.get(key);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const nextId = styles.length;
+  registry.set(key, nextId);
+  styles.push(style);
+  return nextId;
+}
+
+function serializeWorkbookImage(image, media) {
+  const mediaItem = media[image.imageId];
+  if (!mediaItem || !image.range?.tl || !image.range?.ext) {
+    return null;
+  }
+
+  return {
+    mediaId: mediaItem.id,
+    col: image.range.tl.nativeCol + 1,
+    row: image.range.tl.nativeRow + 1,
+    offsetX: image.range.tl.nativeColOff ?? 0,
+    offsetY: image.range.tl.nativeRowOff ?? 0,
+    width: image.range.ext.width,
+    height: image.range.ext.height,
+  };
+}
+
+function extractWorkbookCredit(workbook) {
+  for (const sheetName of ["TV", "Movies"]) {
+    const sheet = workbook.getWorksheet(sheetName);
+    if (!sheet) {
+      continue;
+    }
+
+    const searchLimit = Math.min(sheet.columnCount, 8);
+    for (let columnIndex = 1; columnIndex <= searchLimit; columnIndex += 1) {
+      const cell = sheet.getRow(1).getCell(columnIndex);
+      const display = serializeWorkbookCellValue(cell).display;
+      if (!display.includes("Made by SeaSmoke")) {
+        continue;
+      }
+
+      const hyperlink = typeof cell.value?.hyperlink === "string" ? cell.value.hyperlink : null;
+      return {
+        label: "Original sheet by SeaSmoke#0002",
+        ...(hyperlink ? { url: hyperlink } : {}),
+      };
+    }
+  }
+
+  return null;
+}
+
+function shouldRedactWorkbookCredit(sheetName, display) {
+  return (sheetName === "TV" || sheetName === "Movies") && display.includes("Made by SeaSmoke");
+}
+
+function clipVisibleMerge(merge, visibleColumnIndexes) {
+  if (!merge) {
+    return null;
+  }
+
+  const visibleColumns = [];
+  for (let columnIndex = merge.startCol; columnIndex <= merge.endCol; columnIndex += 1) {
+    if (visibleColumnIndexes.has(columnIndex)) {
+      visibleColumns.push(columnIndex);
+    }
+  }
+
+  if (visibleColumns.length === 0) {
+    return null;
+  }
+
+  return {
+    startRow: merge.startRow,
+    endRow: merge.endRow,
+    startCol: visibleColumns[0],
+    endCol: visibleColumns[visibleColumns.length - 1],
+  };
+}
+
+function parseWorkbookRange(rangeText) {
+  if (!rangeText || typeof rangeText !== "string") {
+    return null;
+  }
+
+  const [left, right = left] = rangeText.split(":");
+  const start = decodeWorkbookAddress(left);
+  const end = decodeWorkbookAddress(right);
+  if (!start || !end) {
+    return null;
+  }
+
+  return {
+    startRow: Math.min(start.row, end.row),
+    endRow: Math.max(start.row, end.row),
+    startCol: Math.min(start.col, end.col),
+    endCol: Math.max(start.col, end.col),
+  };
+}
+
+function decodeWorkbookAddress(address) {
+  const match = String(address).match(/^([A-Z]+)(\d+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    col: letterToColumnNumber(match[1].toUpperCase()),
+    row: Number.parseInt(match[2], 10),
+  };
+}
+
+function columnNumberToLetter(value) {
+  let column = value;
+  let label = "";
+  while (column > 0) {
+    const remainder = (column - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    column = Math.floor((column - 1) / 26);
+  }
+  return label;
+}
+
+function letterToColumnNumber(value) {
+  let total = 0;
+  for (const character of value) {
+    total = total * 26 + (character.charCodeAt(0) - 64);
+  }
+  return total;
+}
+
+function slugifySheetName(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "sheet";
+}
+
+function readWorkbookThemeColors(workbook) {
+  const themeXml = workbook._themes?.theme1 ?? "";
+  const slots = ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"];
+  const fallbacks = ["#ffffff", "#000000", "#ffffff", "#000000", "#ffe89a", "#ff9494", "#d37abc", "#93d2fd", "#639aff", "#4cdc8b", "#0097a7", "#0097a7"];
+
+  return slots.map((slot, index) => readThemeSlotColor(themeXml, slot) ?? fallbacks[index]);
+}
+
+function readThemeSlotColor(themeXml, slot) {
+  if (!themeXml) {
+    return null;
+  }
+
+  const direct = themeXml.match(new RegExp(`<a:${slot}>\\s*<a:srgbClr val="([0-9A-F]{6,8})"`, "i"));
+  if (direct?.[1]) {
+    return normalizeWorkbookArgb(direct[1]);
+  }
+
+  const sys = themeXml.match(new RegExp(`<a:${slot}>\\s*<a:sysClr[^>]*lastClr="([0-9A-F]{6,8})"`, "i"));
+  if (sys?.[1]) {
+    return normalizeWorkbookArgb(sys[1]);
+  }
+
+  return null;
+}
+
+function resolveWorkbookColor(color, themeColors) {
+  if (!color) {
+    return null;
+  }
+
+  if (color.argb) {
+    return normalizeWorkbookArgb(color.argb);
+  }
+
+  if (typeof color.theme === "number") {
+    return themeColors?.[color.theme] ?? null;
+  }
+
+  return null;
+}
+
+function normalizeWorkbookArgb(value) {
+  const input = String(value).trim();
+  if (!input) {
+    return null;
+  }
+
+  const hex = input.length === 8 ? input.slice(2) : input;
+  return `#${hex.toLowerCase()}`;
+}
+
+function normalizeWorkbookFontName(name) {
+  if (!name || name === "Inherit") {
+    return null;
+  }
+  if (name === "Docs-Roboto") {
+    return "Roboto";
+  }
+  return name;
+}
+
+function resolveWorkbookImageMimeType(extension) {
+  switch (String(extension ?? "").toLowerCase()) {
+    case "jpeg":
+    case "jpg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    default:
+      return "image/png";
+  }
+}
+
+function sanitizeWorkbookNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stripUndefined(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined && value !== null && value !== false),
+  );
+}
+
+function formatWorkbookDate(value) {
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(value.getUTCFullYear());
+  return `${day}/${month}/${year}`;
 }
 
 function buildTitles(alId, media) {

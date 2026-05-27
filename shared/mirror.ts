@@ -108,6 +108,116 @@ export type SheetPayload = {
   items: SheetItem[];
 };
 
+export type SheetWorkbookRichTextRun = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  color?: string | null;
+  fontName?: string | null;
+  fontSize?: number | null;
+};
+
+export type SheetWorkbookBorderStyle = {
+  style: string;
+  color?: string | null;
+};
+
+export type SheetWorkbookCellStyle = {
+  fontName?: string | null;
+  fontSize?: number | null;
+  fontWeight?: number | null;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  textColor?: string | null;
+  backgroundColor?: string | null;
+  horizontalAlign?: string | null;
+  verticalAlign?: string | null;
+  wrap?: boolean;
+  borderTop?: SheetWorkbookBorderStyle | null;
+  borderRight?: SheetWorkbookBorderStyle | null;
+  borderBottom?: SheetWorkbookBorderStyle | null;
+  borderLeft?: SheetWorkbookBorderStyle | null;
+};
+
+export type SheetWorkbookCell = {
+  col: number;
+  address: string;
+  display: string;
+  styleId: number;
+  richText?: SheetWorkbookRichTextRun[];
+  hyperlink?: string | null;
+};
+
+export type SheetWorkbookRow = {
+  index: number;
+  height?: number | null;
+  hidden?: boolean;
+  outlineLevel?: number;
+  cells: SheetWorkbookCell[];
+};
+
+export type SheetWorkbookColumn = {
+  index: number;
+  letter: string;
+  width?: number | null;
+  hidden?: boolean;
+  outlineLevel?: number;
+};
+
+export type SheetWorkbookMerge = {
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+};
+
+export type SheetWorkbookImage = {
+  mediaId: string;
+  col: number;
+  row: number;
+  offsetX?: number;
+  offsetY?: number;
+  width: number;
+  height: number;
+};
+
+export type SheetWorkbookMedia = {
+  id: string;
+  mimeType: string;
+  dataUrl: string;
+};
+
+export type SheetWorkbookSheet = {
+  id: number;
+  name: string;
+  slug: string;
+  tabColor?: string | null;
+  rowCount: number;
+  columnCount: number;
+  defaultRowHeight?: number | null;
+  defaultColumnWidth?: number | null;
+  frozenRows?: number;
+  frozenColumns?: number;
+  columns: SheetWorkbookColumn[];
+  rows: SheetWorkbookRow[];
+  merges: SheetWorkbookMerge[];
+  images: SheetWorkbookImage[];
+};
+
+export type SheetWorkbookPayload = {
+  generatedAt: string;
+  credit: {
+    label: string;
+    url?: string | null;
+  } | null;
+  styles: SheetWorkbookCellStyle[];
+  media: SheetWorkbookMedia[];
+  sheets: SheetWorkbookSheet[];
+};
+
 export type EntryPayload = {
   source: {
     originalSite: string;

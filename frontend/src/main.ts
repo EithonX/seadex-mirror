@@ -7,8 +7,14 @@ import {
   type CatalogPayload,
   type EntryPayload,
   type MirrorStatus,
-  type SheetPayload,
+  type SheetWorkbookPayload,
 } from "../../shared/mirror";
+import {
+  formatSheetWorkbookStats,
+  renderSheetWorkbookGrid,
+  renderSheetWorkbookStyleRules,
+  resolveSheetWorkbookSheet,
+} from "./sheet-workbook";
 
 const DATA_ROOT = "/mirror-data";
 const COMPACT_LAYOUT_MEDIA_QUERY = "(max-width: 760px)";
@@ -18,8 +24,6 @@ const THEME_KEY = "seadex-mirror-theme";
 const UPSTREAM_SITE_URL = "https://releases.moe/";
 const UPSTREAM_ABOUT_URL = "https://releases.moe/about/";
 const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
-const UPSTREAM_SHEET_EMBED_URL =
-  "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/htmlview";
 const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
 const DEVELOPER_GITHUB_USERNAME = "EithonX";
 const DEVELOPER_GITHUB_AVATAR_URL = "https://github.com/EithonX.png";
@@ -69,6 +73,11 @@ type CatalogState = {
   offset: number;
 };
 
+type SheetWorkbookState = {
+  tab: string;
+  query: string;
+};
+
 type CatalogGroupSummary = {
   bestLabel: string;
   altLabel: string;
@@ -81,6 +90,7 @@ if (!app) {
 const appRoot = app;
 
 let cachedCatalogPromise: Promise<CatalogIndexPayload> | null = null;
+let cachedSheetWorkbookPromise: Promise<SheetWorkbookPayload> | null = null;
 const groupSummaryCache = new Map<number, CatalogGroupSummary>();
 const groupSummaryInflight = new Map<number, Promise<void>>();
 let globalKeydownCleanup: (() => void) | null = null;
@@ -373,312 +383,135 @@ async function renderCatalog(status: MirrorStatus) {
 
 async function renderSheet(status: MirrorStatus) {
   document.body.classList.add("is-sheet-page");
-  const sheet = await loadSheetPayload();
-  const state = readCatalogStateFromUrl();
-  let sheetView: "live" | "backup" = readSheetViewFromUrl();
+  const workbook = await loadSheetWorkbookPayload();
+  const state = readSheetWorkbookStateFromUrl(workbook);
+  let activeSheet = resolveSheetWorkbookSheet(workbook, state.tab);
+  const creditLabel = workbook.credit?.label ?? "Original sheet by SeaSmoke#0002";
+  const creditUrl = workbook.credit?.url ?? null;
 
   appRoot.innerHTML = renderPageFrame(
     status,
     "sheet",
     `
       <main class="page page--sheet">
-        <div class="sheet-topbar">
-          <div class="sheet-topbar__tabs">
-            <button id="sheet-live-tab" class="sheet-tab-button${sheetView === "live" ? " is-active" : ""}" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-              Live sheet
-            </button>
-            <button id="sheet-backup-tab" class="sheet-tab-button${sheetView === "backup" ? " is-active" : ""}" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-              Mirror backup
-            </button>
+        <style id="sheet-workbook-inline-styles">${renderSheetWorkbookStyleRules(workbook.styles)}</style>
+        <section class="sheet-workbook">
+          <div class="sheet-workbook__panel sheet-workbook__masthead">
+            <div class="sheet-workbook__title-row">
+              <h1 class="sheet-workbook__title">SeaDex Sheets</h1>
+              <span class="sheet-workbook__stats" id="sheet-workbook-active-stats">${escapeHtml(formatSheetWorkbookStats(activeSheet))}</span>
+            </div>
+            <div class="sheet-workbook__masthead-actions">
+              <div class="sheet-workbook__active-copy">
+                <strong id="sheet-workbook-active-name">${escapeHtml(activeSheet.name)}</strong>
+                <span id="sheet-workbook-search-meta">${escapeHtml(formatSheetWorkbookStats(activeSheet))}</span>
+              </div>
+              <a class="sheet-workbook__upstream" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
+                ${renderExternalIcon()}
+                Open upstream
+              </a>
+              <div class="sheet-workbook__credit">
+                <span>Credit</span>
+                ${
+                  creditUrl
+                    ? `<a href="${escapeHtml(creditUrl)}" target="_blank" rel="noreferrer">${escapeHtml(creditLabel)}</a>`
+                    : `<strong>${escapeHtml(creditLabel)}</strong>`
+                }
+              </div>
+            </div>
           </div>
-          <div class="sheet-topbar__meta">
-            <span class="sheet-topbar__label">SeaDex Sheet</span>
-            <a class="sheet-topbar__upstream" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
-              ${renderExternalIcon()}
-              Open upstream
-            </a>
-          </div>
-        </div>
 
-        <section id="sheet-live-panel" class="sheet-frame-shell"${sheetView === "backup" ? " hidden" : ""}>
-          <iframe
-            class="sheet-frame"
-            src="${escapeHtml(UPSTREAM_SHEET_EMBED_URL)}"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            title="SeaDex sheet embed"
-          ></iframe>
-        </section>
+          <div class="sheet-workbook__panel sheet-workbook__toolbar">
+            <div class="sheet-workbook__tabs" role="tablist" aria-label="Workbook tabs">
+              ${workbook.sheets
+                .map(
+                  (sheet) => `
+                    <button
+                      class="sheet-workbook__tab${sheet.slug === activeSheet.slug ? " is-active" : ""}"
+                      type="button"
+                      role="tab"
+                      aria-selected="${sheet.slug === activeSheet.slug ? "true" : "false"}"
+                      data-sheet-tab="${escapeHtml(sheet.slug)}"
+                      ${sheet.tabColor ? `style="--sheet-tab-accent:${escapeHtml(sheet.tabColor)}"` : ""}
+                    >
+                      <span class="sheet-workbook__tab-dot"></span>
+                      ${escapeHtml(sheet.name)}
+                    </button>
+                  `,
+                )
+                .join("")}
+            </div>
 
-        <section id="sheet-backup-panel" class="sheet-backup-wrap"${sheetView === "live" ? " hidden" : ""}>
-          <div class="sheet-backup-inner">
-            <div class="catalog-toolbar catalog-toolbar--sheet">
-              <div class="catalog-toolbar__group catalog-toolbar__group--grow">
-              <label class="control-shell control-shell--search" for="sheet-search">
+            <div class="sheet-workbook__toolbar-side">
+              <label class="sheet-workbook__search" for="sheet-workbook-query">
                 ${renderSearchIcon()}
-                <input id="sheet-search" class="control-input" type="search" placeholder="Filter titles..." value="${escapeHtml(state.search)}" autocomplete="off" />
+                <input
+                  id="sheet-workbook-query"
+                  type="search"
+                  value="${escapeHtml(state.query)}"
+                  placeholder="Find in current tab..."
+                  autocomplete="off"
+                />
               </label>
-              <label class="sheet-pill-select sheet-pill-select--dashed">
-                ${renderPlusCircledIcon()}
-                <span>Format</span>
-                <select id="sheet-format">
-                  <option value="">All formats</option>
-                  ${renderFormatOptions(state.format)}
-                </select>
-              </label>
-            </div>
-              <div class="catalog-toolbar__group">
-              <label class="sheet-pill-select">
-                ${renderMixerIcon()}
-                <span>View</span>
-                <select id="sheet-sort">
-                  <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
-                  <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
-                  <option value="year"${state.sort === "year" ? " selected" : ""}>Newest year</option>
-                  <option value="score"${state.sort === "score" ? " selected" : ""}>Highest score</option>
-                </select>
-              </label>
-            </div>
-            </div>
-
-            <section class="catalog-table-shell catalog-table-shell--sheet">
-              <div class="catalog-table-shell__scroll">
-                <table class="catalog-table catalog-table--sheet" aria-label="SeaDex mirror sheet backup">
-                  <thead>
-                    <tr>
-                      <th>Title</th>
-                      <th>Format</th>
-                      <th>Year</th>
-                      <th>Episodes</th>
-                      <th>Best</th>
-                      <th>Alt</th>
-                      <th>Updated</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="sheet-body"></tbody>
-                </table>
-              </div>
-              <div id="sheet-mobile" class="catalog-mobile"></div>
-            </section>
-
-            <div class="catalog-footer">
-              <div class="catalog-footer__summary" id="sheet-summary">Loading rows...</div>
-              <div class="catalog-footer__controls">
-                <label class="rows-control">
-                  <span>Rows per page</span>
-                  <select id="sheet-limit">
-                    <option value="15"${state.limit === 15 ? " selected" : ""}>15</option>
-                    <option value="30"${state.limit === 30 ? " selected" : ""}>30</option>
-                    <option value="60"${state.limit === 60 ? " selected" : ""}>60</option>
-                    <option value="90"${state.limit === 90 ? " selected" : ""}>90</option>
-                  </select>
-                </label>
-                <div class="page-indicator" id="sheet-indicator">Page 1 of 1</div>
-                <div class="pager">
-                  <button id="sheet-first" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to first page">${renderDoubleChevronLeftIcon()}</button>
-                  <button id="sheet-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
-                  <button id="sheet-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
-                  <button id="sheet-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
-                </div>
-              </div>
             </div>
           </div>
+
+          <section id="sheet-workbook-grid" class="sheet-workbook__grid" aria-live="polite"></section>
         </section>
       </main>
       ${renderSearchDialog()}
-
     `,
   );
 
   wireCommonUi(status, "sheet");
 
-  const liveTab = query<HTMLButtonElement>("#sheet-live-tab");
-  const backupTab = query<HTMLButtonElement>("#sheet-backup-tab");
-  const livePanel = query<HTMLElement>("#sheet-live-panel");
-  const backupPanel = query<HTMLElement>("#sheet-backup-panel");
-  const searchInput = query<HTMLInputElement>("#sheet-search");
-  const formatSelect = query<HTMLSelectElement>("#sheet-format");
-  const sortSelect = query<HTMLSelectElement>("#sheet-sort");
-  const limitSelect = query<HTMLSelectElement>("#sheet-limit");
-  const body = query<HTMLTableSectionElement>("#sheet-body");
-  const mobile = query<HTMLDivElement>("#sheet-mobile");
-  const summary = query<HTMLDivElement>("#sheet-summary");
-  const indicator = query<HTMLDivElement>("#sheet-indicator");
-  const firstButton = query<HTMLButtonElement>("#sheet-first");
-  const previousButton = query<HTMLButtonElement>("#sheet-prev");
-  const nextButton = query<HTMLButtonElement>("#sheet-next");
-  const lastButton = query<HTMLButtonElement>("#sheet-last");
-  const compactLayoutMedia = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
+  const grid = query<HTMLElement>("#sheet-workbook-grid");
+  const queryInput = query<HTMLInputElement>("#sheet-workbook-query");
+  const tabButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-sheet-tab]")];
+  const activeName = query<HTMLElement>("#sheet-workbook-active-name");
+  const activeStats = query<HTMLElement>("#sheet-workbook-active-stats");
+  const searchMeta = query<HTMLElement>("#sheet-workbook-search-meta");
 
-  let currentPayload: ReturnType<typeof filterSheetItems> | null = null;
+  const renderWorkbook = () => {
+    activeSheet = resolveSheetWorkbookSheet(workbook, state.tab);
+    const rendered = renderSheetWorkbookGrid(workbook, activeSheet, state.query);
 
-  const applySheetView = (nextView: "live" | "backup") => {
-    sheetView = nextView;
-    livePanel.hidden = nextView !== "live";
-    backupPanel.hidden = nextView !== "backup";
-    liveTab.classList.toggle("is-active", nextView === "live");
-    backupTab.classList.toggle("is-active", nextView === "backup");
-    syncSheetStateToUrl(state, nextView);
-  };
+    grid.innerHTML = rendered.html;
+    activeName.textContent = activeSheet.name;
+    activeStats.textContent = formatSheetWorkbookStats(activeSheet);
+    searchMeta.textContent = state.query
+      ? `${rendered.matchCount.toLocaleString()} result${rendered.matchCount === 1 ? "" : "s"}`
+      : formatSheetWorkbookStats(activeSheet);
 
-  const renderPage = () => {
-    state.search = searchInput.value.trim();
-    state.format = formatSelect.value;
-    state.sort = sortSelect.value;
-    state.limit = clampLimit(limitSelect.value);
-
-    const payload = filterSheetItems(sheet.items, state);
-    currentPayload = payload;
-    state.offset = payload.filters.offset;
-    const totalPages = Math.max(1, Math.ceil(payload.pagination.total / state.limit));
-    const currentPage = Math.floor(payload.filters.offset / state.limit) + 1;
-    const useMobileLayout = compactLayoutMedia.matches;
-
-    if (useMobileLayout) {
-      body.innerHTML = "";
-      mobile.innerHTML = payload.items.length
-        ? payload.items
-            .map(
-              (item) => `
-            <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
-              <div class="catalog-card__top">
-                <div class="catalog-card__title">
-                  <strong>${escapeHtml(item.title)}</strong>
-                  ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
-                </div>
-                <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-mobile-row-menu-${item.alId}">
-                  ${renderDotsIcon()}
-                </button>
-                <div id="sheet-mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
-                  <a href="/${item.alId}">Open entry</a>
-                  <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
-                  <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
-                </div>
-              </div>
-              <div class="catalog-card__meta">
-                <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
-                <span>${item.year ?? "Unknown"}</span>
-                <span>${item.episodes ?? "?"} ep</span>
-              </div>
-              <dl class="catalog-card__groups">
-                <div>
-                  <dt>Best</dt>
-                  <dd>${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</dd>
-                </div>
-                <div>
-                  <dt>Alt</dt>
-                  <dd>${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</dd>
-                </div>
-              </dl>
-              ${item.excerpt ? `<p class="sheet-mobile-notes">${escapeHtml(item.excerpt)}</p>` : ""}
-              <div class="catalog-card__footer">Updated ${formatDate(item.updatedAt)}</div>
-            </article>
-          `,
-            )
-            .join("")
-        : `<div class="catalog-empty catalog-empty--mobile">No entries matched that sheet filter.</div>`;
-    } else {
-      body.innerHTML = payload.items.length
-        ? payload.items
-            .map(
-              (item) => `
-            <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
-              <td>
-                <div class="catalog-title">
-                  <span class="catalog-title__text">${escapeHtml(item.title)}</span>
-                  ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
-                </div>
-              </td>
-              <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
-              <td>${item.year ?? "-"}</td>
-              <td>${item.episodes ?? "-"}</td>
-              <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.bestGroups, item.bestCount))}</td>
-              <td class="sheet-groups">${escapeHtml(formatSheetGroupLabel(item.altGroups, item.altCount))}</td>
-              <td>${formatDate(item.updatedAt)}</td>
-              <td class="catalog-row__actions">
-                <div class="row-menu-shell">
-                  <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="sheet-row-menu-${item.alId}">
-                    ${renderDotsIcon()}
-                  </button>
-                  <div id="sheet-row-menu-${item.alId}" class="row-menu" hidden>
-                    <a href="/${item.alId}">Open entry</a>
-                    <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
-                    <a href="${escapeHtml(UPSTREAM_SITE_URL)}${item.alId}/" target="_blank" rel="noreferrer">Upstream entry</a>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          `,
-            )
-            .join("")
-        : `<tr><td class="catalog-empty" colspan="8">No entries matched that sheet filter.</td></tr>`;
-      mobile.innerHTML = "";
+    for (const button of tabButtons) {
+      const isActive = button.dataset.sheetTab === activeSheet.slug;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
     }
 
-    summary.textContent = `${payload.pagination.count} row(s) loaded.`;
-    indicator.textContent = `Page ${currentPage} of ${totalPages}`;
-    firstButton.disabled = state.offset === 0;
-    previousButton.disabled = state.offset === 0;
-    nextButton.disabled = payload.pagination.nextOffset === null;
-    lastButton.disabled = currentPage >= totalPages;
-
-    syncSheetStateToUrl(state, sheetView);
-    wireCatalogActions(body, mobile);
+    syncSheetWorkbookStateToUrl(state);
   };
 
-  const scheduleRender = createRenderScheduler(renderPage);
+  for (const button of tabButtons) {
+    button.addEventListener("click", () => {
+      const nextTab = button.dataset.sheetTab;
+      if (!nextTab || nextTab === state.tab) {
+        return;
+      }
+      state.tab = nextTab;
+      renderWorkbook();
+    });
+  }
 
-  const rerenderFromTop = () => {
-    state.offset = 0;
-    scheduleRender();
-  };
+  queryInput.addEventListener(
+    "input",
+    debounce(() => {
+      state.query = queryInput.value.trim();
+      renderWorkbook();
+    }, 80),
+  );
 
-  searchInput.addEventListener("input", debounce(rerenderFromTop, 100));
-  formatSelect.addEventListener("change", rerenderFromTop);
-  sortSelect.addEventListener("change", rerenderFromTop);
-  limitSelect.addEventListener("change", rerenderFromTop);
-  bindMediaQueryChange(compactLayoutMedia, scheduleRender);
-
-  firstButton.addEventListener("click", () => {
-    state.offset = 0;
-    scheduleRender();
-  });
-
-  previousButton.addEventListener("click", () => {
-    state.offset = Math.max(0, state.offset - state.limit);
-    scheduleRender();
-  });
-
-  nextButton.addEventListener("click", () => {
-    if (currentPayload?.pagination.nextOffset === null || currentPayload?.pagination.nextOffset === undefined) {
-      return;
-    }
-    state.offset = currentPayload.pagination.nextOffset;
-    scheduleRender();
-  });
-
-  lastButton.addEventListener("click", () => {
-    if (!currentPayload) {
-      return;
-    }
-    const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
-    state.offset = (totalPages - 1) * state.limit;
-    scheduleRender();
-  });
-
-  liveTab.addEventListener("click", () => {
-    applySheetView("live");
-  });
-
-  backupTab.addEventListener("click", () => {
-    applySheetView("backup");
-  });
-
-  applySheetView(sheetView);
-  renderPage();
+  renderWorkbook();
 }
 
 function renderAbout(status: MirrorStatus) {
@@ -1827,11 +1660,6 @@ function readCatalogStateFromUrl(): CatalogState {
   };
 }
 
-function readSheetViewFromUrl(): "live" | "backup" {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("sheetView") === "backup" ? "backup" : "live";
-}
-
 function syncCatalogStateToUrl(state: CatalogState) {
   const params = new URLSearchParams();
   if (state.search) {
@@ -1858,25 +1686,22 @@ function syncCatalogStateToUrl(state: CatalogState) {
   window.history.replaceState(null, "", nextUrl);
 }
 
-function syncSheetStateToUrl(state: CatalogState, sheetView: "live" | "backup") {
+function readSheetWorkbookStateFromUrl(workbook: SheetWorkbookPayload): SheetWorkbookState {
+  const params = new URLSearchParams(window.location.search);
+  const activeSheet = resolveSheetWorkbookSheet(workbook, params.get("tab"));
+  return {
+    tab: activeSheet.slug,
+    query: params.get("find")?.trim() ?? "",
+  };
+}
+
+function syncSheetWorkbookStateToUrl(state: SheetWorkbookState) {
   const params = new URLSearchParams();
-  if (sheetView === "backup") {
-    params.set("sheetView", "backup");
+  if (state.tab) {
+    params.set("tab", state.tab);
   }
-  if (state.search) {
-    params.set("q", state.search);
-  }
-  if (state.format) {
-    params.set("format", state.format);
-  }
-  if (state.sort !== "updated") {
-    params.set("sort", state.sort);
-  }
-  if (state.limit !== DEFAULT_PAGE_SIZE) {
-    params.set("limit", String(state.limit));
-  }
-  if (state.offset > 0) {
-    params.set("page", String(Math.floor(state.offset / state.limit) + 1));
+  if (state.query) {
+    params.set("find", state.query);
   }
 
   const query = params.toString();
@@ -1890,67 +1715,6 @@ function filterSeason(items: CatalogIndexItem[], seasonFilter: string) {
   }
 
   return items.filter((item) => toSeasonKey(item.season, item.seasonYear ?? item.startYear) === seasonFilter);
-}
-
-function filterSheetItems(
-  items: SheetPayload["items"],
-  state: Pick<CatalogState, "search" | "format" | "sort" | "limit" | "offset">,
-) {
-  const search = state.search.trim().toLowerCase();
-  const format = state.format.trim().toUpperCase();
-
-  let filtered = items;
-  if (search) {
-    filtered = filtered.filter((item) => item.searchText.includes(search));
-  }
-
-  if (format) {
-    filtered = filtered.filter((item) => (item.format ?? "").toUpperCase() === format);
-  }
-
-  const sorted = [...filtered].sort((left, right) => {
-    switch (state.sort) {
-      case "title":
-        return left.title.localeCompare(right.title) || left.alId - right.alId;
-      case "year":
-        return (right.year ?? 0) - (left.year ?? 0) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
-      case "score":
-        return (right.averageScore ?? 0) - (left.averageScore ?? 0) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
-      default:
-        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.title.localeCompare(right.title);
-    }
-  });
-
-  const limit = Math.max(1, state.limit);
-  const offset = Math.max(0, Math.min(state.offset, Math.max(0, sorted.length - 1)));
-  const pageItems = sorted.slice(offset, offset + limit);
-  const nextOffset = offset + limit < sorted.length ? offset + limit : null;
-
-  return {
-    filters: {
-      search: state.search,
-      format: state.format,
-      sort: state.sort,
-      limit,
-      offset,
-    },
-    pagination: {
-      count: pageItems.length,
-      total: sorted.length,
-      nextOffset,
-    },
-    items: pageItems,
-  };
-}
-
-function formatSheetGroupLabel(groups: string[], count: number) {
-  if (groups.length > 0) {
-    return groups[0] ?? "";
-  }
-  if (count > 0) {
-    return `${count} release${count === 1 ? "" : "s"}`;
-  }
-  return "";
 }
 
 function buildSeasonOptions(items: CatalogIndexItem[]) {
@@ -2137,39 +1901,11 @@ async function getCatalog() {
   return cachedCatalogPromise;
 }
 
-async function loadSheetPayload(): Promise<SheetPayload> {
-  try {
-    return await fetchJson<SheetPayload>(`${DATA_ROOT}/sheet.json`);
-  } catch (error) {
-    if (!isMirrorDataMissingError(error)) {
-      throw error;
-    }
-
-    const catalog = await getCatalog();
-    return {
-      generatedAt: catalog.generatedAt,
-      items: catalog.items.map((item) => ({
-        alId: item.alId,
-        recordId: item.recordId,
-        title: item.titles.display,
-        format: item.format,
-        status: item.status,
-        year: item.startYear ?? item.seasonYear,
-        episodes: item.episodes,
-        averageScore: item.averageScore,
-        incomplete: item.incomplete,
-        comparisonCount: item.comparisonLinks.length,
-        torrentCount: item.torrentCount,
-        bestCount: item.bestTorrentCount,
-        altCount: Math.max(0, item.torrentCount - item.bestTorrentCount),
-        bestGroups: item.bestGroups ?? [],
-        altGroups: item.altGroups ?? [],
-        excerpt: item.excerpt,
-        updatedAt: item.sourceUpdatedAt,
-        searchText: item.searchText,
-      })),
-    };
+async function loadSheetWorkbookPayload(): Promise<SheetWorkbookPayload> {
+  if (!cachedSheetWorkbookPromise) {
+    cachedSheetWorkbookPromise = fetchJson<SheetWorkbookPayload>(`${DATA_ROOT}/sheet-workbook.json`);
   }
+  return cachedSheetWorkbookPromise;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
