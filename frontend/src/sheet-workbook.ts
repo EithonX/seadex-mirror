@@ -83,7 +83,14 @@ export function resolveSheetWorkbookSheet(
 
 export function renderSheetWorkbookStyleRules(styles: SheetWorkbookCellStyle[]) {
   return styles
-    .map((style, index) => `.sheet-style-${index}{${renderSheetWorkbookStyleDeclaration(style)}}`)
+    .map((style, index) => {
+      const light = renderSheetWorkbookStyleDeclaration(style, false);
+      const dark = renderSheetWorkbookStyleDeclaration(style, true);
+      return `
+        :root[data-theme="light"] .sheet-style-${index} { ${light} }
+        :root:not([data-theme="light"]) .sheet-style-${index} { ${dark} }
+      `;
+    })
     .join("");
 }
 
@@ -132,7 +139,7 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
         <th
           class="sheet-table__head sheet-style-${headerCell.styleId}${column.stickyLeft !== null ? " sheet-table__head--frozen" : ""}"
           scope="col"
-          ${column.stickyLeft !== null ? `style="left:${column.stickyLeft}px"` : ""}
+          style="width:${column.widthPx}px; min-width:${column.widthPx}px; max-width:${column.widthPx}px;${column.stickyLeft !== null ? ` left:${column.stickyLeft}px;` : ""}"
         >
           <div class="sheet-cell-body">
             <div class="sheet-cell-text">${escapeHtml(column.label)}</div>
@@ -173,7 +180,7 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
                     <td
                       class="${classes.join(" ")}"
                       data-sheet-cell="${escapeHtml(cell.address)}"
-                      ${cell.column.stickyLeft !== null ? `style="left:${cell.column.stickyLeft}px"` : ""}
+                      style="width:${cell.column.widthPx}px; min-width:${cell.column.widthPx}px; max-width:${cell.column.widthPx}px;${cell.column.stickyLeft !== null ? ` left:${cell.column.stickyLeft}px;` : ""}"
                       ${shouldGroupCell ? `rowspan="${group.rows.length}"` : ""}
                     >
                       ${renderTableCellBody(cell)}
@@ -237,16 +244,16 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
       firstMatchAddress ||= note.bodyCell?.address ?? note.numberCell?.address ?? null;
 
       return `
-        <tr class="sheet-notes-table__row">
-          <th class="sheet-notes-table__index${note.numberCell ? ` sheet-style-${note.numberCell.styleId}` : ""}">
+        <div class="sheet-note-card">
+          <div class="sheet-note-card__number${note.numberCell ? ` sheet-style-${note.numberCell.styleId}` : ""}">
             ${note.numberCell ? renderPlainCellMarkup(note.numberCell) : ""}
-          </th>
-          <td class="sheet-notes-table__body${note.bodyCell ? ` sheet-style-${note.bodyCell.styleId}` : ""}"${
+          </div>
+          <div class="sheet-note-card__body${note.bodyCell ? ` sheet-style-${note.bodyCell.styleId}` : ""}"${
             note.bodyCell ? ` data-sheet-cell="${escapeHtml(note.bodyCell.address)}"` : ""
           }>
             ${note.bodyCell ? renderCellBody(note.bodyCell) : ""}
-          </td>
-        </tr>
+          </div>
+        </div>
       `;
     })
     .join("");
@@ -257,16 +264,16 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
       firstMatchAddress ||= item.bodyCell?.address ?? item.labelCell?.address ?? null;
 
       return `
-        <tr class="sheet-notes-table__row">
-          <th class="sheet-notes-table__legend-label${item.labelCell ? ` sheet-style-${item.labelCell.styleId}` : ""}">
+        <div class="sheet-legend-card">
+          <div class="sheet-legend-card__header${item.labelCell ? ` sheet-style-${item.labelCell.styleId}` : ""}">
             ${item.labelCell ? renderPlainCellMarkup(item.labelCell) : ""}
-          </th>
-          <td class="sheet-notes-table__legend-body${item.bodyCell ? ` sheet-style-${item.bodyCell.styleId}` : ""}"${
+          </div>
+          <div class="sheet-legend-card__body${item.bodyCell ? ` sheet-style-${item.bodyCell.styleId}` : ""}"${
             item.bodyCell ? ` data-sheet-cell="${escapeHtml(item.bodyCell.address)}"` : ""
           }>
             ${item.bodyCell ? renderCellBody(item.bodyCell) : ""}
-          </td>
-        </tr>
+          </div>
+        </div>
       `;
     })
     .join("");
@@ -279,21 +286,19 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
   return {
     html: `
       <div class="sheet-notes">
-        <table class="sheet-notes-table" aria-label="${escapeHtml(title)}">
-          <tbody>
-            <tr class="sheet-notes-table__section">
-              <th class="${titleCell ? `sheet-style-${titleCell.styleId}` : ""}" colspan="2">${escapeHtml(title)}</th>
-            </tr>
+        <section class="sheet-notes-section">
+          <h2 class="sheet-notes-section__title${titleCell ? ` sheet-style-${titleCell.styleId}` : ""}">${escapeHtml(title)}</h2>
+          <div class="sheet-notes-list">
             ${notesHtml}
-            <tr class="sheet-notes-table__spacer">
-              <td colspan="2"></td>
-            </tr>
-            <tr class="sheet-notes-table__section">
-              <th class="${legendTitleCell ? `sheet-style-${legendTitleCell.styleId}` : ""}" colspan="2">${escapeHtml(legendTitle)}</th>
-            </tr>
+          </div>
+        </section>
+
+        <section class="sheet-notes-section">
+          <h2 class="sheet-notes-section__title${legendTitleCell ? ` sheet-style-${legendTitleCell.styleId}` : ""}">${escapeHtml(legendTitle)}</h2>
+          <div class="sheet-legend-grid">
             ${legendHtml}
-          </tbody>
-        </table>
+          </div>
+        </section>
         ${emptyState}
       </div>
     `,
@@ -334,6 +339,20 @@ function resolveTableCell(
 ): TableCell {
   const directKey = `${rowIndex}:${column.index}`;
   const directCell = sourceCells.get(directKey);
+  const ownerKey = lookups.ownerByCoveredCell.get(directKey);
+  const ownerCell = ownerKey ? sourceCells.get(ownerKey) : null;
+
+  if (ownerKey && ownerCell) {
+    return {
+      rowIndex,
+      column,
+      sourceCell: ownerCell,
+      address: directCell?.address ?? `${column.letter}${rowIndex}`,
+      ownerAddress: ownerCell.address,
+      display: ownerCell.display,
+    };
+  }
+
   if (directCell) {
     return {
       rowIndex,
@@ -343,21 +362,6 @@ function resolveTableCell(
       ownerAddress: directCell.address,
       display: directCell.display,
     };
-  }
-
-  const ownerKey = lookups.ownerByCoveredCell.get(directKey);
-  if (ownerKey) {
-    const ownerCell = sourceCells.get(ownerKey);
-    if (ownerCell) {
-      return {
-        rowIndex,
-        column,
-        sourceCell: ownerCell,
-        address: `${column.letter}${rowIndex}`,
-        ownerAddress: ownerCell.address,
-        display: ownerCell.display,
-      };
-    }
   }
 
   const fallbackCell = createBlankCell(rowIndex, column, sheet);
@@ -563,9 +567,9 @@ function renderComparisonCell(cell: TableCell) {
       <div class="sheet-links">
         ${urls
           .map(
-            (url, index) => `
-              <a class="sheet-links__item" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
-                ${urls.length === 1 ? trimDisplayUrl(url, 40) : `Comparison ${index + 1}`}
+            (url) => `
+              <a class="sheet-links__item" href="${escapeHtml(url)}" target="_blank" rel="noreferrer" title="${escapeHtml(url)}">
+                ${trimDisplayUrl(url, 40)}
               </a>
             `,
           )
@@ -699,18 +703,18 @@ function renderInlineRichTextStyle(run: SheetWorkbookRichTextRun) {
     declarations.push(`font-family:${renderSheetFontFamily(run.fontName)}`);
   }
   if (run.fontSize) {
-    declarations.push(`font-size:${run.fontSize}px`);
+    declarations.push(`font-size:${run.fontSize}pt`);
   }
   return declarations.join(";");
 }
 
-function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle) {
+function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle, isDark: boolean) {
   const declarations = [];
   if (style.fontName) {
     declarations.push(`font-family:${renderSheetFontFamily(style.fontName)}`);
   }
   if (style.fontSize) {
-    declarations.push(`font-size:${style.fontSize}px`);
+    declarations.push(`font-size:${style.fontSize}pt`);
   }
   if (style.fontWeight) {
     declarations.push(`font-weight:${style.fontWeight}`);
@@ -728,12 +732,39 @@ function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle) {
     }
     declarations.push(`text-decoration-line:${lines.join(" ")}`);
   }
-  if (style.textColor) {
-    declarations.push(`color:${style.textColor}`);
+
+  const hasBg = style.backgroundColor && style.backgroundColor.toLowerCase() !== "#ffffff";
+  const isWhiteBg = style.backgroundColor && style.backgroundColor.toLowerCase() === "#ffffff";
+
+  if (isDark) {
+    // In dark mode: keep colored backgrounds, use white text for readability
+    if (hasBg) {
+      declarations.push(`background:${style.backgroundColor} !important`);
+      // White text + dark outline for readability on colored backgrounds
+      declarations.push(`color:#ffffff !important`);
+      declarations.push(`text-shadow:0 0 2px rgba(0,0,0,0.8), 0 1px 3px rgba(0,0,0,0.6)`);
+    } else if (isWhiteBg) {
+      // White bg -> transparent in dark mode
+      declarations.push(`background:transparent !important`);
+      declarations.push(`color:var(--sheet-text) !important`);
+    } else {
+      // No bg set
+      if (style.textColor && style.textColor.toLowerCase() !== "#000000") {
+        declarations.push(`color:${style.textColor} !important`);
+      } else if (style.textColor) {
+        declarations.push(`color:var(--sheet-text) !important`);
+      }
+    }
+  } else {
+    // Light mode: render as-is
+    if (style.textColor) {
+      declarations.push(`color:${style.textColor} !important`);
+    }
+    if (style.backgroundColor) {
+      declarations.push(`background:${style.backgroundColor} !important`);
+    }
   }
-  if (style.backgroundColor) {
-    declarations.push(`background:${style.backgroundColor}`);
-  }
+
   if (style.horizontalAlign) {
     declarations.push(`text-align:${style.horizontalAlign}`);
   }
@@ -743,25 +774,10 @@ function renderSheetWorkbookStyleDeclaration(style: SheetWorkbookCellStyle) {
   if (style.wrap) {
     declarations.push("white-space:pre-wrap");
   }
-  appendBorderDeclaration(declarations, "top", style.borderTop);
-  appendBorderDeclaration(declarations, "right", style.borderRight);
-  appendBorderDeclaration(declarations, "bottom", style.borderBottom);
-  appendBorderDeclaration(declarations, "left", style.borderLeft);
+  // Do NOT render individual cell borders from spreadsheet data.
+  // The table already has uniform 1px teal borders on every th/td.
+  // Rendering the spreadsheet's "thick" 3px borders causes massive vertical bloat.
   return declarations.join(";");
-}
-
-function appendBorderDeclaration(
-  declarations: string[],
-  side: "top" | "right" | "bottom" | "left",
-  border: SheetWorkbookCellStyle["borderTop"],
-) {
-  if (!border?.style) {
-    return;
-  }
-
-  const width = border.style === "thick" ? "3px" : border.style === "medium" ? "2px" : "1px";
-  const color = border.color ?? "#dadce0";
-  declarations.push(`border-${side}:${width} solid ${color}`);
 }
 
 function createBlankCell(rowIndex: number, column: VisibleColumn, sheet: SheetWorkbookSheet): SheetWorkbookCell {

@@ -399,25 +399,18 @@ async function renderSheet(status: MirrorStatus) {
           <div class="sheet-workbook__panel sheet-workbook__masthead">
             <div class="sheet-workbook__title-row">
               <h1 class="sheet-workbook__title">SeaDex Sheets</h1>
-              <span class="sheet-workbook__stats" id="sheet-workbook-active-stats">${escapeHtml(formatSheetWorkbookStats(activeSheet))}</span>
             </div>
             <div class="sheet-workbook__masthead-actions">
-              <div class="sheet-workbook__active-copy">
-                <strong id="sheet-workbook-active-name">${escapeHtml(activeSheet.name)}</strong>
-                <span id="sheet-workbook-search-meta">${escapeHtml(formatSheetWorkbookStats(activeSheet))}</span>
-              </div>
               <a class="sheet-workbook__upstream" href="${escapeHtml(UPSTREAM_SHEET_URL)}" target="_blank" rel="noreferrer">
                 ${renderExternalIcon()}
                 Open upstream
               </a>
-              <div class="sheet-workbook__credit">
-                <span>Credit</span>
-                ${
-                  creditUrl
+              <span class="sheet-workbook__credit">
+                by ${creditUrl
                     ? `<a href="${escapeHtml(creditUrl)}" target="_blank" rel="noreferrer">${escapeHtml(creditLabel)}</a>`
                     : `<strong>${escapeHtml(creditLabel)}</strong>`
                 }
-              </div>
+              </span>
             </div>
           </div>
 
@@ -468,20 +461,12 @@ async function renderSheet(status: MirrorStatus) {
   const grid = query<HTMLElement>("#sheet-workbook-grid");
   const queryInput = query<HTMLInputElement>("#sheet-workbook-query");
   const tabButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-sheet-tab]")];
-  const activeName = query<HTMLElement>("#sheet-workbook-active-name");
-  const activeStats = query<HTMLElement>("#sheet-workbook-active-stats");
-  const searchMeta = query<HTMLElement>("#sheet-workbook-search-meta");
 
   const renderWorkbook = () => {
     activeSheet = resolveSheetWorkbookSheet(workbook, state.tab);
     const rendered = renderSheetWorkbookGrid(workbook, activeSheet, state.query);
 
     grid.innerHTML = rendered.html;
-    activeName.textContent = activeSheet.name;
-    activeStats.textContent = formatSheetWorkbookStats(activeSheet);
-    searchMeta.textContent = state.query
-      ? `${rendered.matchCount.toLocaleString()} result${rendered.matchCount === 1 ? "" : "s"}`
-      : formatSheetWorkbookStats(activeSheet);
 
     for (const button of tabButtons) {
       const isActive = button.dataset.sheetTab === activeSheet.slug;
@@ -2240,7 +2225,7 @@ function initializeCustomDropdowns() {
     const iconHtml = iconSvg ? iconSvg.outerHTML : "";
 
     const wrapper = document.createElement("div");
-    wrapper.className = parent.className;
+    wrapper.className = parent.className;    
     wrapper.classList.add("custom-select");
     if (isDashed) {
       wrapper.classList.add("custom-select--dashed");

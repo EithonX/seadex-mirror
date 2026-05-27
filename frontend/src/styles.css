@@ -2143,8 +2143,8 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.9rem;
-  padding: 0.15rem 0.65rem 0.25rem;
+  gap: 0.75rem;
+  padding: 0.3rem 0.65rem;
   background: var(--sheet-panel-strong);
   border-bottom: 1px solid var(--sheet-line);
 }
@@ -2152,68 +2152,32 @@ img {
 .sheet-workbook__title-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
   min-width: 0;
 }
 
 .sheet-workbook__title {
   margin: 0;
   color: var(--sheet-text);
-  font: 600 0.95rem/1.1 Arial, sans-serif;
-}
-
-.sheet-workbook__stats {
-  display: inline-flex;
-  align-items: center;
-  min-height: auto;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--sheet-muted);
-  font: 400 0.78rem/1.1 Arial, sans-serif;
-  letter-spacing: 0;
-  text-transform: none;
+  font: 600 0.88rem/1.1 Arial, sans-serif;
 }
 
 .sheet-workbook__masthead-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-}
-
-.sheet-workbook__active-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-  margin-right: 0.25rem;
-  min-width: 0;
-}
-
-.sheet-workbook__active-copy strong {
-  color: var(--sheet-text);
-  font: 600 0.78rem/1.1 Arial, sans-serif;
-}
-
-.sheet-workbook__active-copy span {
-  color: var(--sheet-muted);
-  font: 400 0.72rem/1.2 Arial, sans-serif;
+  gap: 0.65rem;
 }
 
 .sheet-workbook__upstream,
 .sheet-workbook__credit {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: auto;
+  gap: 0.3rem;
   padding: 0;
-  border-radius: 0;
   border: 0;
   background: transparent;
   color: var(--sheet-muted);
-  font: 400 0.74rem/1.2 Arial, sans-serif;
+  font: 400 0.72rem/1.2 Arial, sans-serif;
+  text-decoration: none;
 }
 
 .sheet-workbook__upstream:hover,
@@ -2222,21 +2186,17 @@ img {
 }
 
 .sheet-workbook__upstream svg {
-  width: 0.86rem;
-  height: 0.86rem;
+  width: 0.8rem;
+  height: 0.8rem;
 }
 
-.sheet-workbook__credit span {
-  color: var(--sheet-muted);
-  font-size: 0.72rem;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.sheet-workbook__credit strong,
 .sheet-workbook__credit a {
   color: inherit;
+  text-decoration: none;
+}
+
+.sheet-workbook__credit a:hover {
+  text-decoration: underline;
 }
 
 .sheet-workbook__toolbar {
@@ -2365,7 +2325,7 @@ img {
   border-spacing: 0;
   table-layout: fixed;
   color: var(--sheet-text);
-  font: 400 0.82rem/1.25 Arial, sans-serif;
+  font: 400 0.8rem/1.2 Arial, sans-serif;
 }
 
 .sheet-table th,
@@ -2420,7 +2380,7 @@ img {
 
 .sheet-cell-body {
   min-height: 100%;
-  padding: 0.2rem 0.34rem;
+  padding: 0.12rem 0.25rem;
 }
 
 .sheet-cell-text {
@@ -2432,7 +2392,7 @@ img {
 
 .sheet-cell-blank {
   display: block;
-  min-height: 1.1rem;
+  min-height: 1rem;
 }
 
 .sheet-cell-muted {
@@ -2459,6 +2419,11 @@ img {
   border: 0;
   font: 400 0.78rem/1.2 Arial, sans-serif;
   text-decoration: underline;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sheet-notes {
@@ -2466,54 +2431,67 @@ img {
   background: var(--sheet-surface);
 }
 
-.sheet-notes-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  color: var(--sheet-text);
-  font: 400 0.82rem/1.25 Arial, sans-serif;
+.sheet-notes-section {
+  margin-bottom: 1.5rem;
 }
 
-.sheet-notes-table th,
-.sheet-notes-table td {
-  border: 1px solid var(--sheet-line);
-  padding: 0;
-  vertical-align: top;
-}
-
-.sheet-notes-table__section th {
-  text-align: left;
+.sheet-notes-section__title {
+  margin: 0 0 0.5rem;
   font: 700 0.98rem/1.15 Arial, sans-serif;
-  padding: 0.28rem 0.4rem;
+  color: var(--sheet-text);
+  padding: 0.28rem 0;
 }
 
-.sheet-notes-table__index {
-  width: 3.3rem;
-  text-align: right;
-  font-weight: 400;
+.sheet-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
-.sheet-notes-table__legend-label {
-  width: 14.5rem;
-  text-align: left;
+.sheet-note-card {
+  display: flex;
+  border: 1px solid var(--sheet-line);
+  background: var(--sheet-surface);
 }
 
-.sheet-notes-table__index .sheet-cell-text,
-.sheet-notes-table__legend-label .sheet-cell-text {
-  white-space: normal;
+.sheet-note-card__number {
+  flex: 0 0 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--sheet-line);
+  padding: 0.22rem 0.34rem;
+  font-weight: 500;
+  text-align: center;
 }
 
-.sheet-notes-table__body .sheet-cell-body,
-.sheet-notes-table__legend-body .sheet-cell-body,
-.sheet-notes-table__legend-label .sheet-cell-body,
-.sheet-notes-table__index .sheet-cell-body {
+.sheet-note-card__body {
+  flex: 1 1 auto;
   padding: 0.22rem 0.34rem;
 }
 
-.sheet-notes-table__spacer td {
-  height: 1.4rem;
-  border-left-color: transparent;
-  border-right-color: transparent;
+.sheet-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.5rem;
+}
+
+.sheet-legend-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--sheet-line);
+  background: var(--sheet-surface);
+}
+
+.sheet-legend-card__header {
+  padding: 0.22rem 0.34rem;
+  border-bottom: 1px solid var(--sheet-line);
+  font-weight: 600;
+}
+
+.sheet-legend-card__body {
+  padding: 0.22rem 0.34rem;
+  flex: 1 1 auto;
 }
 
 .sheet-notes__empty {
