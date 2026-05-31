@@ -543,7 +543,7 @@ function renderAbout(status: MirrorStatus) {
             <div class="about-list">
               <div class="about-block">
                 <h2>What this mirror is for</h2>
-                <p>Recently i faced issues with SeaDex website because Anilist api was down. So i made this mirror website. This mirror is here as a backup in case the original site is unavailable. It is meant to give you another way to read the same public SeaDex information when you need them.</p>
+                <p>Recently I faced issues with the SeaDex website because the AniList API was down. So I made this mirror website. This mirror is here as a backup in case the original site is unavailable. It is meant to give you another way to read the same public SeaDex information when you need it.</p>
               </div>
               <div class="about-block">
                 <h2>Who to credit</h2>

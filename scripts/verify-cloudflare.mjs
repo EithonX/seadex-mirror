@@ -46,7 +46,7 @@ async function run() {
     }
     const hexPattern = /^[0-9a-fA-F]{32}$/;
     if (!hexPattern.test(trimmed)) {
-      logWarning(`CLOUDFLARE_ACCOUNT_ID does not look like a valid Cloudflare Account ID. It should be a 32-character hexadecimal string, but is current of length ${accountId.length}.`);
+      logWarning(`CLOUDFLARE_ACCOUNT_ID does not look like a valid Cloudflare Account ID. It should be a 32-character hexadecimal string, but is currently of length ${accountId.length}.`);
     } else {
       logSuccess(`CLOUDFLARE_ACCOUNT_ID format is valid (32-character hex).`);
     }
