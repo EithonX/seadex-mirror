@@ -1036,10 +1036,13 @@ function renderCatalogMobileCard(item: CatalogItem) {
         </div>
       </div>
       
-      <div class="catalog-mobile-item__meta">
-        <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
-        <span>${year}</span>
-        <span>${item.episodes ?? "?"} ep</span>
+      <div class="catalog-mobile-item__meta-row">
+        <div class="catalog-mobile-item__meta">
+          <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
+          <span>${year}</span>
+          <span>${item.episodes ?? "?"} ep</span>
+        </div>
+        <div class="catalog-mobile-item__date">${formatDate(item.sourceUpdatedAt)}</div>
       </div>
       
       <div class="catalog-mobile-item__groups">
@@ -2130,8 +2133,8 @@ function formatDate(value: string | null) {
   const date = new Date(value);
   return Number.isNaN(date.valueOf())
     ? value
-    : new Intl.DateTimeFormat(undefined, {
-        month: "numeric",
+    : new Intl.DateTimeFormat("en-US", {
+        month: "short",
         day: "numeric",
         year: "numeric",
       }).format(date);
