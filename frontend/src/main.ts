@@ -68,6 +68,7 @@ type CatalogState = {
   search: string;
   format: string;
   season: string;
+  year: string;
   sort: string;
   limit: number;
   offset: number;
@@ -150,6 +151,7 @@ async function renderCatalog(status: MirrorStatus) {
   const catalog = await getCatalog();
   const state = readCatalogStateFromUrl();
   const seasonOptions = buildSeasonOptions(catalog.items);
+  const yearOptions = buildYearOptions(catalog.items);
 
   appRoot.innerHTML = renderPageFrame(
     status,
@@ -158,41 +160,64 @@ async function renderCatalog(status: MirrorStatus) {
       <main class="page page--catalog">
         <section class="catalog-page">
           <div class="catalog-toolbar">
-            <div class="catalog-toolbar__group catalog-toolbar__group--grow">
+            <div class="catalog-toolbar__group catalog-toolbar__group--search">
               <label class="control-shell control-shell--search" for="catalog-search">
                 ${renderSearchIcon()}
                 <input id="catalog-search" class="control-input" type="search" placeholder="Filter anime..." value="${escapeHtml(state.search)}" autocomplete="off" />
               </label>
-              <label class="control-select control-select--dashed">
-                <span>Format</span>
-                <select id="catalog-format">
-                  <option value="">All formats</option>
-                  ${renderFormatOptions(state.format)}
-                </select>
-              </label>
-              <label class="control-select">
-                <span>Season</span>
-                <select id="catalog-season">
-                  <option value="">All seasons</option>
-                  ${seasonOptions
-                    .map(
-                      (option) =>
-                        `<option value="${escapeHtml(option.value)}"${option.value === state.season ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
-                    )
-                    .join("")}
-                </select>
-              </label>
+              <button id="mobile-filter-trigger" class="mobile-filter-button" type="button" aria-expanded="false">
+                ${renderMixerIcon()}
+                <span>Filters</span>
+                <span id="mobile-filter-badge" class="mobile-filter-badge" hidden></span>
+              </button>
             </div>
-            <div class="catalog-toolbar__group">
-              <label class="control-select">
-                <span>View</span>
-                <select id="catalog-sort">
-                  <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
-                  <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
-                  <option value="year"${state.sort === "year" ? " selected" : ""}>Newest year</option>
-                  <option value="score"${state.sort === "score" ? " selected" : ""}>Highest score</option>
-                </select>
-              </label>
+            <div class="catalog-toolbar__filters" id="catalog-toolbar-filters">
+              <div class="catalog-toolbar__filters-inner">
+                <div class="catalog-toolbar__group catalog-toolbar__group--grow">
+                  <label class="control-select control-select--dashed">
+                    <span>Format</span>
+                    <select id="catalog-format">
+                      <option value="">All formats</option>
+                      ${renderFormatOptions(state.format)}
+                    </select>
+                  </label>
+                  <label class="control-select">
+                    <span>Season</span>
+                    <select id="catalog-season">
+                      <option value="">All seasons</option>
+                      ${seasonOptions
+                        .map(
+                          (option) =>
+                            `<option value="${escapeHtml(option.value)}"${option.value === state.season ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+                        )
+                        .join("")}
+                    </select>
+                  </label>
+                  <label class="control-select">
+                    <span>Year</span>
+                    <select id="catalog-year">
+                      <option value="">All years</option>
+                      ${yearOptions
+                        .map(
+                          (option) =>
+                            `<option value="${escapeHtml(option.value)}"${option.value === state.year ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+                        )
+                        .join("")}
+                    </select>
+                  </label>
+                </div>
+                <div class="catalog-toolbar__group">
+                  <label class="control-select">
+                    <span>View</span>
+                    <select id="catalog-sort">
+                      <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
+                      <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
+                      <option value="year"${state.sort === "year" ? " selected" : ""}>Newest year</option>
+                      <option value="score"${state.sort === "score" ? " selected" : ""}>Highest score</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -252,10 +277,12 @@ async function renderCatalog(status: MirrorStatus) {
   );
 
   wireCommonUi(status, "index");
+  wireFilterDrawer();
 
   const searchInput = query<HTMLInputElement>("#catalog-search");
   const formatSelect = query<HTMLSelectElement>("#catalog-format");
   const seasonSelect = query<HTMLSelectElement>("#catalog-season");
+  const yearSelect = query<HTMLSelectElement>("#catalog-year");
   const sortSelect = query<HTMLSelectElement>("#catalog-sort");
   const limitSelect = query<HTMLSelectElement>("#catalog-limit");
   const body = query<HTMLTableSectionElement>("#catalog-body");
@@ -274,10 +301,23 @@ async function renderCatalog(status: MirrorStatus) {
     state.search = searchInput.value.trim();
     state.format = formatSelect.value;
     state.season = seasonSelect.value;
+    state.year = yearSelect.value;
     state.sort = sortSelect.value;
     state.limit = Number.parseInt(limitSelect.value, 10) || DEFAULT_PAGE_SIZE;
 
-    const filteredItems = filterSeason(catalog.items, state.season);
+    // Update mobile filter badge
+    const activeCount = (state.format ? 1 : 0) + (state.season ? 1 : 0) + (state.year ? 1 : 0);
+    const badge = document.getElementById("mobile-filter-badge");
+    if (badge) {
+      if (activeCount > 0) {
+        badge.textContent = String(activeCount);
+        badge.hidden = false;
+      } else {
+        badge.hidden = true;
+      }
+    }
+
+    const filteredItems = filterSeasonAndYear(catalog.items, state.season, state.year);
     currentPayload = filterCatalogItems(filteredItems, {
       search: state.search,
       format: state.format,
@@ -347,6 +387,7 @@ async function renderCatalog(status: MirrorStatus) {
   searchInput.addEventListener("input", debouncedRender);
   formatSelect.addEventListener("change", resetAndRender);
   seasonSelect.addEventListener("change", resetAndRender);
+  yearSelect.addEventListener("change", resetAndRender);
   sortSelect.addEventListener("change", resetAndRender);
   limitSelect.addEventListener("change", resetAndRender);
   bindMediaQueryChange(compactLayoutMedia, scheduleRender);
@@ -879,6 +920,8 @@ function renderSearchDialog() {
     </div>
   `;
 }
+
+
 
 function renderFormatOptions(activeFormat: string) {
   return [
@@ -1639,6 +1682,7 @@ function readCatalogStateFromUrl(): CatalogState {
     search: params.get("q")?.trim() ?? "",
     format: params.get("format")?.trim().toUpperCase() ?? "",
     season: params.get("season")?.trim().toUpperCase() ?? "",
+    year: params.get("year")?.trim() ?? "",
     sort: normalizeSort(params.get("sort")),
     limit,
     offset: (page - 1) * limit,
@@ -1655,6 +1699,9 @@ function syncCatalogStateToUrl(state: CatalogState) {
   }
   if (state.season) {
     params.set("season", state.season);
+  }
+  if (state.year) {
+    params.set("year", state.year);
   }
   if (state.sort !== "updated") {
     params.set("sort", state.sort);
@@ -1694,66 +1741,52 @@ function syncSheetWorkbookStateToUrl(state: SheetWorkbookState) {
   window.history.replaceState(null, "", nextUrl);
 }
 
-function filterSeason(items: CatalogIndexItem[], seasonFilter: string) {
-  if (!seasonFilter) {
-    return items;
+function filterSeasonAndYear(items: CatalogIndexItem[], seasonFilter: string, yearFilter: string) {
+  let result = items;
+  if (seasonFilter) {
+    result = result.filter((item) => (item.season ?? "").toUpperCase() === seasonFilter.toUpperCase());
   }
-
-  return items.filter((item) => toSeasonKey(item.season, item.seasonYear ?? item.startYear) === seasonFilter);
+  if (yearFilter) {
+    result = result.filter((item) => {
+      const year = item.seasonYear ?? item.startYear;
+      return year !== null && year !== undefined && String(year) === yearFilter;
+    });
+  }
+  return result;
 }
 
 function buildSeasonOptions(items: CatalogIndexItem[]) {
-  const unique = new Map<string, string>();
+  const unique = new Set<string>();
   for (const item of items) {
-    const key = toSeasonKey(item.season, item.seasonYear ?? item.startYear);
-    if (!key) {
-      continue;
+    if (item.season) {
+      unique.add(item.season.toUpperCase());
     }
-    unique.set(key, formatSeasonLabel(item.season, item.seasonYear ?? item.startYear));
   }
 
-  return [...unique.entries()]
-    .sort((left, right) => compareSeasonKeys(right[0], left[0]))
-    .map(([value, label]) => ({ value, label }));
+  const order = ["WINTER", "SPRING", "SUMMER", "FALL"];
+  return [...unique]
+    .sort((left, right) => order.indexOf(left) - order.indexOf(right))
+    .map((season) => ({
+      value: season,
+      label: capitalize(season.toLowerCase()),
+    }));
 }
 
-function toSeasonKey(season: string | null, year: number | null | undefined) {
-  if (!season || !year) {
-    return "";
+function buildYearOptions(items: CatalogIndexItem[]) {
+  const unique = new Set<number>();
+  for (const item of items) {
+    const year = item.seasonYear ?? item.startYear;
+    if (year) {
+      unique.add(year);
+    }
   }
-  return `${season.toUpperCase()}:${year}`;
-}
 
-function formatSeasonLabel(season: string | null, year: number | null | undefined) {
-  if (!season || !year) {
-    return "Unknown";
-  }
-  return `${capitalize(season.toLowerCase())} ${year}`;
-}
-
-function compareSeasonKeys(left: string, right: string) {
-  const [leftSeason, leftYear] = left.split(":");
-  const [rightSeason, rightYear] = right.split(":");
-  const yearDiff = Number.parseInt(leftYear, 10) - Number.parseInt(rightYear, 10);
-  if (yearDiff !== 0) {
-    return yearDiff;
-  }
-  return seasonOrder(leftSeason) - seasonOrder(rightSeason);
-}
-
-function seasonOrder(season: string) {
-  switch (season) {
-    case "WINTER":
-      return 0;
-    case "SPRING":
-      return 1;
-    case "SUMMER":
-      return 2;
-    case "FALL":
-      return 3;
-    default:
-      return 4;
-  }
+  return [...unique]
+    .sort((left, right) => right - left)
+    .map((year) => ({
+      value: String(year),
+      label: String(year),
+    }));
 }
 
 function readGroupSummary(item: CatalogItem): CatalogGroupSummary {
@@ -2468,3 +2501,18 @@ document.addEventListener("click", (e) => {
     closeAllCustomDropdowns();
   }
 });
+ 
+function wireFilterDrawer() {
+  const trigger = document.querySelector<HTMLButtonElement>("#mobile-filter-trigger");
+  const filtersContainer = document.querySelector<HTMLDivElement>("#catalog-toolbar-filters");
+ 
+  if (!trigger || !filtersContainer) return;
+ 
+  let isOpen = false;
+ 
+  trigger.addEventListener("click", () => {
+    isOpen = !isOpen;
+    trigger.setAttribute("aria-expanded", String(isOpen));
+    filtersContainer.classList.toggle("is-expanded", isOpen);
+  });
+}

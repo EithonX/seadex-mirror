@@ -355,6 +355,8 @@ img {
    ========================================================================== */
 
 .catalog-toolbar {
+  position: relative;
+  z-index: 50; /* Elevates dropdowns above stacking contexts created by backdrop-filter on cards */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2961,21 +2963,22 @@ img {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
     gap: 0.75rem;
+    margin-bottom: 0.75rem;
   }
 
   .catalog-toolbar__group {
     display: contents;
   }
 
-  .control-shell--search {
+  .catalog-toolbar__group--search {
     grid-column: span 6;
     width: 100% !important;
   }
 
-  /* Catalog page select columns (Format, Season) */
+  /* Catalog page select columns (Format, Season, Year) */
   .catalog-page .control-select,
   .catalog-page .custom-select.control-select {
-    grid-column: span 2;
+    grid-column: span 3;
     width: 100%;
     min-width: 0;
   }
@@ -2983,7 +2986,7 @@ img {
   /* Catalog page view/sort select in the second group */
   .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select,
   .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .custom-select.control-select {
-    grid-column: span 2;
+    grid-column: span 3;
     width: 100%;
     min-width: 0;
   }
@@ -3434,7 +3437,7 @@ img {
 
 @media (max-width: 600px) {
 
-  /* Catalog page dropdowns: Format and Season side-by-side (span 3), View select takes full width (span 6) */
+  /* Catalog page dropdowns: Format, Season, Year side-by-side (span 3), View select side-by-side (span 3) */
   .catalog-page .catalog-toolbar__group--grow .control-select,
   .catalog-page .catalog-toolbar__group--grow .custom-select.control-select {
     grid-column: span 3;
@@ -3442,7 +3445,7 @@ img {
 
   .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .control-select,
   .catalog-page .catalog-toolbar__group:not(.catalog-toolbar__group--grow) .custom-select.control-select {
-    grid-column: span 6;
+    grid-column: span 3;
   }
 
   /* Micro-adjust paddings and font size on small screens for absolute premium layout */
@@ -3664,3 +3667,159 @@ img {
     padding-top: 2rem;
   }
 }
+
+/* ==========================================================================
+   Mobile Filter Drawer & Responsive Toolbar Overrides
+   ========================================================================== */
+
+/* By default, hide the mobile filter trigger button but declare its premium styles */
+.mobile-filter-button {
+  display: none !important;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.35rem;
+  padding: 0 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.1s ease;
+  user-select: none;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mobile-filter-button:hover {
+  background: var(--panel-soft);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.mobile-filter-button:active {
+  transform: translateY(1px);
+}
+
+.mobile-filter-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--muted);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), color 0.3s ease;
+}
+
+.mobile-filter-button[aria-expanded="true"] svg {
+  transform: rotate(90deg) scale(1.1);
+  color: var(--text);
+}
+
+/* Search group standard desktop styles */
+.catalog-toolbar__group--search {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+/* Collapsible inline filters panel layout and sizing */
+.catalog-toolbar__filters {
+  display: grid;
+  grid-template-rows: 1fr; /* Expanded on desktop by default */
+  width: 100%;
+  transition: grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.catalog-toolbar__filters-inner {
+  min-height: 0; /* Critical for grid-template-rows transition to work! */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  /* Show the mobile filters button next to search */
+  .mobile-filter-button {
+    display: inline-flex !important;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  /* Search toolbar group fills full width */
+  .catalog-toolbar__group--search {
+    display: flex !important;
+    grid-column: span 6 !important;
+    width: 100% !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Search bar input shell stretches to occupy remaining space */
+  .catalog-toolbar__group--search .control-shell--search {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  /* Collapse filters by default on mobile and ensure full grid width */
+  .catalog-toolbar__filters {
+    grid-column: span 6 !important;
+    grid-template-rows: 0fr;
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    overflow: hidden;
+    transition: grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1), max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Smooth slide down when expanded and maintain full grid width */
+  .catalog-toolbar__filters.is-expanded {
+    grid-column: span 6 !important;
+    grid-template-rows: 1fr;
+    max-height: 500px;
+    opacity: 1;
+    margin-top: 0.5rem;
+    overflow: visible !important;
+  }
+
+  /* 2x2 grid layout inside collapsible filters container */
+  .catalog-toolbar__filters-inner {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem;
+  }
+
+  .catalog-toolbar__filters-inner .catalog-toolbar__group {
+    display: contents;
+  }
+
+  .catalog-toolbar__filters-inner .control-select,
+  .catalog-toolbar__filters-inner .custom-select.control-select {
+    grid-column: span 3;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Notification Badge for active filters */
+.mobile-filter-badge {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 99px;
+  background: var(--best-bg);
+  color: var(--best-text);
+  font-size: 0.68rem;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.25rem;
+  box-shadow: 0 0 0 2.5px var(--panel);
+  z-index: 5;
+}
+
