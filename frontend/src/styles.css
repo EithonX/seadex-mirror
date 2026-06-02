@@ -266,7 +266,7 @@ img {
 }
 
 .header-search::after {
-  content: "⌘K";
+  content: "Ctrl K";
   margin-left: auto;
   font-size: 0.7rem;
   font-weight: 600;
@@ -279,7 +279,7 @@ img {
 }
 
 :root[data-theme="light"] .header-search::after {
-  content: "Ctrl+K";
+  content: "Ctrl K";
   background: rgba(0, 0, 0, 0.04);
 }
 
@@ -338,6 +338,12 @@ img {
   filter: grayscale(0%);
 }
 
+.theme-sun, .theme-moon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .theme-moon {
   display: none;
 }
@@ -347,7 +353,7 @@ img {
 }
 
 :root[data-theme="light"] .theme-moon {
-  display: inline-flex;
+  display: flex;
 }
 
 /* ==========================================================================

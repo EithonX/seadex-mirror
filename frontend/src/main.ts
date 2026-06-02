@@ -271,7 +271,6 @@ async function renderCatalog(status: MirrorStatus) {
           <footer class="catalog-meta">
             <span>${status.counts.entries} mirrored entries</span>
             <span>${status.counts.torrents} torrent rows</span>
-            <span>${status.integrity.listIdParity === "match" ? "List parity locked" : "Parity warning"}</span>
             <span>Updated ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
           </footer>
         </section>
@@ -849,7 +848,6 @@ async function renderEntry(status: MirrorStatus, alId: number) {
             <section class="content-section content-section--subtle">
               <div class="mirror-inline">
                 <span>${status.counts.entries} mirrored entries</span>
-                <span>${status.integrity.expandedTorrentParity === "match" ? "Expanded torrent parity locked" : "Parity warning"}</span>
                 <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
               </div>
             </section>
@@ -909,9 +907,6 @@ function renderShell(status: MirrorStatus, context: "index" | "entry" | "about" 
         </button>
 
         <div class="site-header__actions">
-          <a class="ghost-icon-button" href="${escapeHtml(originalSiteUrl)}" target="_blank" rel="noreferrer" aria-label="Open original SeaDex site">
-            ${renderExternalIcon()}
-          </a>
           <button id="theme-toggle" class="ghost-icon-button" type="button" aria-label="Toggle theme">
             <span class="theme-sun">${renderSunIcon()}</span>
             <span class="theme-moon">${renderMoonIcon()}</span>
