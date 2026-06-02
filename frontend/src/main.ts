@@ -964,13 +964,17 @@ function renderFormatOptions(activeFormat: string) {
 function renderCatalogRow(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "-";
+  const posterSrc = item.coverImage?.extraLarge ?? "";
 
   return `
     <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
       <td>
         <div class="catalog-title">
-          <span class="catalog-title__text">${escapeHtml(item.titles.display)}</span>
-          ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+          ${posterSrc ? `<img src="${escapeHtml(posterSrc)}" class="catalog-title__poster" alt="" loading="lazy" />` : `<div class="catalog-title__poster catalog-title__poster--fallback"></div>`}
+          <div class="catalog-title__text-group">
+            <span class="catalog-title__text">${escapeHtml(item.titles.display)}</span>
+            ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+          </div>
         </div>
       </td>
       <td>${escapeHtml(formatCatalogFormat(item.format))}</td>
@@ -1002,43 +1006,55 @@ function renderCatalogRow(item: CatalogItem) {
 function renderCatalogMobileCard(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "Unknown";
+  const posterSrc = item.coverImage?.extraLarge ?? "";
 
   return `
-    <article class="catalog-card" data-entry-link="/${item.alId}" tabindex="0">
-      <div class="catalog-card__top">
-        <div class="catalog-card__title">
-          <strong>${escapeHtml(item.titles.display)}</strong>
-          ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
-        </div>
-        <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="mobile-row-menu-${item.alId}">
-          ${renderDotsIcon()}
-        </button>
-        <div id="mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
-          <a href="/${item.alId}">Open entry</a>
-          <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
-          ${
-            item.comparisonLinks[0]
-              ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer">First comparison</a>`
-              : ""
-          }
+    <article class="catalog-mobile-item" data-entry-link="/${item.alId}" tabindex="0">
+      <div class="catalog-mobile-item__poster">
+        ${posterSrc ? `<img src="${escapeHtml(posterSrc)}" alt="" loading="lazy" />` : `<div class="catalog-mobile-item__poster-fallback"></div>`}
+      </div>
+      
+      <div class="catalog-mobile-item__title">
+        <span>${escapeHtml(item.titles.display)}</span>
+        ${item.incomplete ? `<span class="pill pill--warn">Incomplete</span>` : ""}
+      </div>
+      
+      <div class="catalog-mobile-item__action">
+        <div class="row-menu-shell">
+          <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="mobile-row-menu-${item.alId}">
+            ${renderDotsIcon()}
+          </button>
+          <div id="mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
+            <a href="/${item.alId}">Open entry</a>
+            <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+            ${
+              item.comparisonLinks[0]
+                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer">First comparison</a>`
+                : ""
+            }
+          </div>
         </div>
       </div>
-      <div class="catalog-card__meta">
+      
+      <div class="catalog-mobile-item__meta">
         <span>${escapeHtml(formatCatalogFormat(item.format))}</span>
         <span>${year}</span>
         <span>${item.episodes ?? "?"} ep</span>
       </div>
-      <dl class="catalog-card__groups">
-        <div>
-          <dt>Best</dt>
-          <dd>${escapeHtml(groups.bestLabel)}</dd>
-        </div>
-        <div>
-          <dt>Alt</dt>
-          <dd>${escapeHtml(groups.altLabel)}</dd>
-        </div>
-      </dl>
-      <div class="catalog-card__footer">Updated ${formatDate(item.sourceUpdatedAt)}</div>
+      
+      <div class="catalog-mobile-item__groups">
+        ${groups.bestLabel ? `
+        <div class="catalog-mobile-item__group">
+          <span class="catalog-mobile-item__group-label">Best</span>
+          <span class="catalog-mobile-item__group-value">${escapeHtml(groups.bestLabel)}</span>
+        </div>` : ""}
+        
+        ${groups.altLabel ? `
+        <div class="catalog-mobile-item__group">
+          <span class="catalog-mobile-item__group-label">Alt</span>
+          <span class="catalog-mobile-item__group-value">${escapeHtml(groups.altLabel)}</span>
+        </div>` : ""}
+      </div>
     </article>
   `;
 }
