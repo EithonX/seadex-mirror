@@ -3767,18 +3767,16 @@ img {
   .catalog-toolbar__filters {
     grid-column: span 6 !important;
     grid-template-rows: 0fr;
-    max-height: 0;
     opacity: 0;
     margin-top: 0;
     overflow: hidden;
-    transition: grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1), max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   /* Smooth slide down when expanded and maintain full grid width */
   .catalog-toolbar__filters.is-expanded {
     grid-column: span 6 !important;
     grid-template-rows: 1fr;
-    max-height: 500px;
     opacity: 1;
     margin-top: 0.5rem;
     overflow: visible !important;
@@ -3801,6 +3799,103 @@ img {
     width: 100%;
     min-width: 0;
   }
+
+  .catalog-reset-button {
+    grid-column: span 6 !important;
+    width: 100% !important;
+    max-width: none !important;
+    justify-content: center !important;
+    margin-top: 0.75rem !important;
+    order: 10 !important; /* Force it to the bottom of the collapsible filters grid */
+    padding: 0.75rem 0 0.25rem !important;
+    border: none !important;
+    border-top: 1px solid var(--line) !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    max-height: 48px !important;
+    box-shadow: none !important;
+    transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, border-color 0.2s ease, background-color 0.2s ease !important;
+  }
+  .catalog-reset-button:hover:not(:disabled) {
+    background: transparent !important;
+    color: var(--accent) !important;
+  }
+  .catalog-reset-button:disabled {
+    max-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    border-top: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
+}
+
+/* Premium Filter Reset Button styling */
+.catalog-reset-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.65rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  
+  /* Collapsed state by default for smooth slide out */
+  max-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  overflow: hidden;
+  white-space: nowrap;
+  
+  transition: max-width 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, color 0.2s ease, background-color 0.2s ease, visibility 0.3s;
+}
+
+.catalog-reset-button:not(:disabled) {
+  max-width: 150px; /* Expands to full width dynamically */
+  padding: 0.4rem 0.65rem;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.catalog-reset-button svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--muted);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease;
+}
+
+.catalog-reset-button:hover:not(:disabled) {
+  color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+.catalog-reset-button:hover:not(:disabled) svg {
+  color: var(--accent);
+  transform: rotate(90deg);
+}
+
+.catalog-reset-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.catalog-reset-button:disabled {
+  max-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 /* Notification Badge for active filters */

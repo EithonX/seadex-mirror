@@ -205,6 +205,10 @@ async function renderCatalog(status: MirrorStatus) {
                         .join("")}
                     </select>
                   </label>
+                  <button id="catalog-reset" class="catalog-reset-button" type="button" title="Clear active filters" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <span>Clear filters</span>
+                  </button>
                 </div>
                 <div class="catalog-toolbar__group">
                   <label class="control-select">
@@ -294,6 +298,7 @@ async function renderCatalog(status: MirrorStatus) {
   const nextButton = query<HTMLButtonElement>("#catalog-next");
   const lastButton = query<HTMLButtonElement>("#catalog-last");
   const compactLayoutMedia = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
+  const resetButton = document.getElementById("catalog-reset") as HTMLButtonElement | null;
 
   let currentPayload: CatalogPayload | null = null;
 
@@ -315,6 +320,11 @@ async function renderCatalog(status: MirrorStatus) {
       } else {
         badge.hidden = true;
       }
+    }
+
+    // Update Reset button state
+    if (resetButton) {
+      resetButton.disabled = activeCount === 0;
     }
 
     const filteredItems = filterSeasonAndYear(catalog.items, state.season, state.year);
@@ -391,6 +401,17 @@ async function renderCatalog(status: MirrorStatus) {
   sortSelect.addEventListener("change", resetAndRender);
   limitSelect.addEventListener("change", resetAndRender);
   bindMediaQueryChange(compactLayoutMedia, scheduleRender);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", () => {
+      formatSelect.value = "";
+      seasonSelect.value = "";
+      yearSelect.value = "";
+      formatSelect.dispatchEvent(new Event("change"));
+      seasonSelect.dispatchEvent(new Event("change"));
+      yearSelect.dispatchEvent(new Event("change"));
+    });
+  }
 
   firstButton.addEventListener("click", () => {
     state.offset = 0;
