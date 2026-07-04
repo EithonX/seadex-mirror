@@ -63,11 +63,34 @@ type TableGroup = {
   rows: TableRow[];
 };
 
+type CatalogSheetModel = {
+  headerRow: SheetWorkbookRow;
+  visibleColumns: VisibleColumn[];
+  rows: TableRow[];
+  groups: TableGroup[];
+  groupedColumnIndexes: Set<number>;
+  numberColumnWidth: number;
+  headerHtml: string;
+  colgroupHtml: string;
+};
+
+type NotesSheetModel = {
+  title: string;
+  titleCell: SheetWorkbookCell | null;
+  legendTitle: string;
+  legendTitleCell: SheetWorkbookCell | null;
+  notes: NotesBlock[];
+  legend: LegendBlock[];
+};
+
 export type RenderSheetWorkbookGridResult = {
   html: string;
   matchCount: number;
   firstMatchAddress: string | null;
 };
+
+const catalogSheetModelCache = new WeakMap<SheetWorkbookSheet, CatalogSheetModel>();
+const notesSheetModelCache = new WeakMap<SheetWorkbookSheet, NotesSheetModel>();
 
 export function resolveSheetWorkbookSheet(
   workbook: SheetWorkbookPayload,
@@ -117,54 +140,21 @@ export function renderSheetWorkbookGrid(
 
 export function formatSheetWorkbookStats(sheet: SheetWorkbookSheet) {
   if (sheet.slug === "notes") {
-    const { notes, legend } = buildNotesCollections(sheet);
+    const { notes, legend } = getNotesSheetModel(sheet);
     return `${notes.length.toLocaleString()} notes · ${legend.length.toLocaleString()} legend`;
   }
 
-  const headerRow = findSheetHeaderRow(sheet);
-  const rows = buildTableRows(sheet, headerRow);
+  const { rows } = getCatalogSheetModel(sheet);
   return `${rows.length.toLocaleString()} entries · ${rows[0]?.cells.length.toLocaleString() ?? "0"} columns`;
 }
 
 function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string): RenderSheetWorkbookGridResult {
-  const headerRow = findSheetHeaderRow(sheet);
-  const visibleColumns = buildVisibleColumns(sheet, headerRow);
-  const rows = buildTableRows(sheet, headerRow);
+  const { visibleColumns, groups, groupedColumnIndexes, numberColumnWidth, headerHtml, colgroupHtml } =
+    getCatalogSheetModel(sheet);
   const query = searchQuery.trim().toLowerCase();
-  const groups = buildTableGroups(rows);
   const filteredGroups = query
     ? groups.filter((group) => group.rows.some((row) => row.searchText.includes(query)))
     : groups;
-  const groupedColumnIndexes = new Set(visibleColumns.slice(0, 2).map((column) => column.index));
-  const numberColumnWidth = 56;
-
-  const headerHtml = [
-    compactHtml(`
-      <th
-        class="sheet-table__head sheet-table__head--number"
-        scope="col"
-        style="width:${numberColumnWidth}px; min-width:${numberColumnWidth}px; max-width:${numberColumnWidth}px;"
-      >
-        <div class="sheet-cell-body"><div class="sheet-cell-text">#</div></div>
-      </th>
-    `),
-    ...visibleColumns.map((column) => {
-      const headerCell = headerRow.cells.find((cell) => cell.col === column.index);
-      if (!headerCell) {
-        return "";
-      }
-
-      return compactHtml(`
-        <th
-          class="sheet-table__head sheet-style-${headerCell.styleId}${column.stickyLeft !== null ? " sheet-table__head--frozen" : ""}"
-          scope="col"
-          style="width:${column.widthPx}px; min-width:${column.widthPx}px; max-width:${column.widthPx}px;${column.stickyLeft !== null ? ` left:${column.stickyLeft}px;` : ""}"
-        >
-          <div class="sheet-cell-body"><div class="sheet-cell-text">${escapeHtml(column.label)}</div></div>
-        </th>
-      `);
-    }),
-  ].join("");
 
   const rowsHtml = filteredGroups.length
     ? filteredGroups
@@ -225,11 +215,6 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
         .join("")
     : `<tr><td class="sheet-table__empty" colspan="${visibleColumns.length + 1}">No rows matched that filter.</td></tr>`;
 
-  const colgroupHtml = [
-    `<col style="width:${numberColumnWidth}px" data-sheet-column="number" />`,
-    ...visibleColumns.map((column) => `<col style="width:${column.widthPx}px" data-sheet-column="${escapeHtml(column.letter)}" />`),
-  ].join("");
-
   return {
     html: compactHtml(`
       <div class="sheet-table-shell">
@@ -249,7 +234,7 @@ function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string):
 
 function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): RenderSheetWorkbookGridResult {
   const query = searchQuery.trim().toLowerCase();
-  const { title, titleCell, legendTitle, legendTitleCell, notes, legend } = buildNotesCollections(sheet);
+  const { title, titleCell, legendTitle, legendTitleCell, notes, legend } = getNotesSheetModel(sheet);
 
   let matchCount = 0;
   let firstMatchAddress: string | null = null;
@@ -357,16 +342,106 @@ function renderNotesSheet(sheet: SheetWorkbookSheet, searchQuery: string): Rende
   };
 }
 
-function buildTableRows(sheet: SheetWorkbookSheet, headerRow: SheetWorkbookRow): TableRow[] {
+function getCatalogSheetModel(sheet: SheetWorkbookSheet): CatalogSheetModel {
+  const cached = catalogSheetModelCache.get(sheet);
+  if (cached) {
+    return cached;
+  }
+
+  const headerRow = findSheetHeaderRow(sheet);
   const visibleColumns = buildVisibleColumns(sheet, headerRow);
   const lookups = buildMergeLookups(sheet);
+  const sourceCells = buildSourceCellMap(sheet);
+  const rows = buildTableRows(sheet, headerRow, visibleColumns, lookups, sourceCells);
+  const groups = buildTableGroups(rows);
+  const groupedColumnIndexes = new Set(visibleColumns.slice(0, 2).map((column) => column.index));
+  const numberColumnWidth = 56;
+  const headerHtml = renderCatalogHeaderHtml(headerRow, visibleColumns, numberColumnWidth);
+  const colgroupHtml = renderCatalogColgroupHtml(visibleColumns, numberColumnWidth);
+
+  const model: CatalogSheetModel = {
+    headerRow,
+    visibleColumns,
+    rows,
+    groups,
+    groupedColumnIndexes,
+    numberColumnWidth,
+    headerHtml,
+    colgroupHtml,
+  };
+  catalogSheetModelCache.set(sheet, model);
+  return model;
+}
+
+function getNotesSheetModel(sheet: SheetWorkbookSheet): NotesSheetModel {
+  const cached = notesSheetModelCache.get(sheet);
+  if (cached) {
+    return cached;
+  }
+
+  const model = buildNotesCollections(sheet);
+  notesSheetModelCache.set(sheet, model);
+  return model;
+}
+
+function renderCatalogHeaderHtml(
+  headerRow: SheetWorkbookRow,
+  visibleColumns: VisibleColumn[],
+  numberColumnWidth: number,
+) {
+  return [
+    compactHtml(`
+      <th
+        class="sheet-table__head sheet-table__head--number"
+        scope="col"
+        style="width:${numberColumnWidth}px; min-width:${numberColumnWidth}px; max-width:${numberColumnWidth}px;"
+      >
+        <div class="sheet-cell-body"><div class="sheet-cell-text">#</div></div>
+      </th>
+    `),
+    ...visibleColumns.map((column) => {
+      const headerCell = headerRow.cells.find((cell) => cell.col === column.index);
+      if (!headerCell) {
+        return "";
+      }
+
+      return compactHtml(`
+        <th
+          class="sheet-table__head sheet-style-${headerCell.styleId}${column.stickyLeft !== null ? " sheet-table__head--frozen" : ""}"
+          scope="col"
+          style="width:${column.widthPx}px; min-width:${column.widthPx}px; max-width:${column.widthPx}px;${column.stickyLeft !== null ? ` left:${column.stickyLeft}px;` : ""}"
+        >
+          <div class="sheet-cell-body"><div class="sheet-cell-text">${escapeHtml(column.label)}</div></div>
+        </th>
+      `);
+    }),
+  ].join("");
+}
+
+function renderCatalogColgroupHtml(visibleColumns: VisibleColumn[], numberColumnWidth: number) {
+  return [
+    `<col style="width:${numberColumnWidth}px" data-sheet-column="number" />`,
+    ...visibleColumns.map((column) => `<col style="width:${column.widthPx}px" data-sheet-column="${escapeHtml(column.letter)}" />`),
+  ].join("");
+}
+
+function buildSourceCellMap(sheet: SheetWorkbookSheet) {
   const sourceCells = new Map<string, SheetWorkbookCell>();
   for (const row of sheet.rows) {
     for (const cell of row.cells) {
       sourceCells.set(`${row.index}:${cell.col}`, cell);
     }
   }
+  return sourceCells;
+}
 
+function buildTableRows(
+  sheet: SheetWorkbookSheet,
+  headerRow: SheetWorkbookRow,
+  visibleColumns: VisibleColumn[],
+  lookups: MergeLookups,
+  sourceCells: Map<string, SheetWorkbookCell>,
+): TableRow[] {
   return sheet.rows
     .filter((row) => row.index > headerRow.index && !row.hidden && row.cells.some((cell) => cell.display.trim()))
     .map((row) => {
