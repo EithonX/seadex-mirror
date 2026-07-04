@@ -12,6 +12,7 @@
     "deploy": "npm run build:site && wrangler pages deploy dist --project-name seadex",
     "deploy:full": "npm run data:build -- --force=true --onUnchanged=materialize && npm run build:frontend && wrangler pages deploy dist --project-name seadex",
     "typecheck": "tsc -p tsconfig.frontend.json --noEmit",
+    "verify:deployed-site": "node scripts/verify-deployed-site.mjs",
     "verify:frontend-build": "node scripts/verify-frontend-build.mjs",
     "verify:mirror-data": "node scripts/verify-mirror-data.mjs"
   },

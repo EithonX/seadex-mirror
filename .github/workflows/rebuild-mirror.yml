@@ -85,3 +85,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=${{ env.CLOUDFLARE_PAGES_PRODUCTION_BRANCH }} --commit-dirty=true
+
+      - name: Verify deployed site
+        if: steps.mirror.outputs.skipped != 'true'
+        run: npm run verify:deployed-site
