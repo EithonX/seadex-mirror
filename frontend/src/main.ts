@@ -79,6 +79,10 @@ type SheetWorkbookState = {
   query: string;
 };
 
+type EntryPayloadResult =
+  | { ok: true; payload: EntryPayload }
+  | { ok: false; error: unknown };
+
 type CatalogGroupSummary = {
   bestLabel: string;
   altLabel: string;
@@ -99,12 +103,46 @@ let globalKeydownCleanup: (() => void) | null = null;
 applySavedTheme();
 
 boot().catch((error) => {
-  appRoot.innerHTML = renderFatal(error instanceof Error ? error.message : String(error));
+  appRoot.innerHTML = renderFatal(error);
 });
 
+class FetchJsonError extends Error {
+  constructor(
+    message: string,
+    readonly url: string,
+  ) {
+    super(message);
+  }
+}
+
+class HttpStatusError extends FetchJsonError {
+  constructor(
+    url: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(body || `Request failed with ${status}`, url);
+  }
+}
+
+class MirrorDataMissingError extends FetchJsonError {
+  constructor(url: string) {
+    super(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`, url);
+  }
+}
+
 async function boot() {
-  const status = await fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
   const route = parseRoute(window.location.pathname);
+  const statusPromise = fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
+
+  if (route.kind === "entry") {
+    const entryLoad = loadEntryPayload(route.alId);
+    const status = await statusPromise;
+    await renderEntry(status, route.alId, entryLoad.result, entryLoad.url);
+    return;
+  }
+
+  const status = await statusPromise;
 
   switch (route.kind) {
     case "index":
@@ -119,10 +157,21 @@ async function boot() {
       setDocumentMeta("Sheet | SeaDex Mirror");
       await renderSheet(status);
       return;
-    case "entry":
-      await renderEntry(status, route.alId);
-      return;
   }
+}
+
+function loadEntryPayload(alId: number) {
+  const url = getEntryDataUrl(alId);
+  const result = fetchJson<EntryPayload>(url).then(
+    (payload): EntryPayloadResult => ({ ok: true, payload }),
+    (error: unknown): EntryPayloadResult => ({ ok: false, error }),
+  );
+
+  return { url, result };
+}
+
+function getEntryDataUrl(alId: number) {
+  return `${DATA_ROOT}/entries/${alId}.json`;
 }
 
 function parseRoute(pathname: string): RouteContext {
@@ -696,7 +745,12 @@ function renderMaintainerProfileCard(input: {
   `;
 }
 
-async function renderEntry(status: MirrorStatus, alId: number) {
+async function renderEntry(
+  status: MirrorStatus,
+  alId: number,
+  entryResultPromise: Promise<EntryPayloadResult>,
+  entryUrl: string,
+) {
   appRoot.innerHTML = renderPageFrame(
     status,
     "entry",
@@ -711,26 +765,13 @@ async function renderEntry(status: MirrorStatus, alId: number) {
   wireCommonUi(status, "entry");
 
   try {
-    const catalog = await getCatalog();
-    const entryExists = catalog.items.some((item) => item.alId === alId);
-
-    if (!entryExists) {
-      appRoot.innerHTML = renderPageFrame(
-        status,
-        "entry",
-        renderEntryNotFound(alId),
-      );
-      wireCommonUi(status, "entry");
-      setDocumentMeta(`Entry Not Found | SeaDex Mirror`);
-      return;
+    const entryResult = await entryResultPromise;
+    if (!entryResult.ok) {
+      throw entryResult.error;
     }
 
-    const payload = await fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`);
+    const payload = entryResult.payload;
     const entry = payload.entry;
-    const availableIds = new Set(catalog.items.map((item) => item.alId));
-    const filteredRelations = entry.relations.filter((relation) =>
-      isDisplayableAnimeRelation(relation, availableIds),
-    );
     setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
 
     appRoot.innerHTML = renderPageFrame(
@@ -840,7 +881,7 @@ async function renderEntry(status: MirrorStatus, alId: number) {
                 <div class="entry-notes">${escapeHtml(entry.notes || "No notes were included for this entry.")}</div>
               </section>
 
-              ${renderRelationsSection(filteredRelations)}
+              ${renderRelationsSection(entry.relations)}
             </section>
           </div>
 
@@ -859,9 +900,20 @@ async function renderEntry(status: MirrorStatus, alId: number) {
 
     wireCommonUi(status, "entry");
   } catch (error) {
+    if (isNotFoundForUrl(error, entryUrl)) {
+      appRoot.innerHTML = renderPageFrame(
+        status,
+        "entry",
+        renderEntryNotFound(alId),
+      );
+      wireCommonUi(status, "entry");
+      setDocumentMeta(`Entry Not Found | SeaDex Mirror`);
+      return;
+    }
+
     console.error("Failed to load entry:", error);
     let displayMessage = error instanceof Error ? error.message : String(error);
-    if (displayMessage.includes("Mirror data is missing") || displayMessage.includes("npm run")) {
+    if (isMirrorDataMissingError(error)) {
       displayMessage = "The detail for this anime entry could not be loaded because it is currently undergoing maintenance. Please check back shortly.";
     } else {
       displayMessage = "A temporary network issue occurred. Please refresh or try again later.";
@@ -1399,21 +1451,10 @@ function renderRelationChip(label: string) {
   return `<span class="relation-chip">${escapeHtml(label)}</span>`;
 }
 
-function isDisplayableAnimeRelation(
-  relation: EntryPayload["entry"]["relations"][number],
-  availableIds: Set<number>,
-) {
-  const node = relation.node;
-  return (
-    node?.id !== undefined &&
-    availableIds.has(node.id) &&
-    (node.type === undefined || node.type === null || node.type === "ANIME")
-  );
-}
-
-function renderFatal(message: string) {
+function renderFatal(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
   let displayMessage = message;
-  if (message.includes("Mirror data is missing") || message.includes("npm run")) {
+  if (isMirrorDataMissingError(error)) {
     displayMessage = "The mirror database is currently undergoing maintenance. Please check back shortly.";
   }
 
@@ -1461,7 +1502,7 @@ function renderEntryError(alId: number, message: string) {
         <h1>Failed to Load Entry</h1>
         <p>${escapeHtml(message)}</p>
         <div class="error-panel__actions">
-          <button class="comparison-link" onclick="window.location.reload()">
+          <button class="comparison-link" type="button" data-entry-retry>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-cw"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
             <span>Retry Loading</span>
           </button>
@@ -1478,9 +1519,16 @@ function renderEntryError(alId: number, message: string) {
 function wireCommonUi(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
   wireThemeToggle();
   wireSearchDialog(status, context);
+  wireEntryRetry();
   if (context === "index" || context === "sheet") {
     initializeCustomDropdowns();
   }
+}
+
+function wireEntryRetry() {
+  document.querySelector<HTMLButtonElement>("[data-entry-retry]")?.addEventListener("click", () => {
+    window.location.reload();
+  });
 }
 
 function wireThemeToggle() {
@@ -1590,11 +1638,8 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
     document.body.classList.add("is-modal-open");
     isOpen = true;
 
-    if (context === "index" || context === "sheet") {
-      const sourceSearch =
-        document.querySelector<HTMLInputElement>("#catalog-search") ??
-        document.querySelector<HTMLInputElement>("#sheet-search");
-      input.value = sourceSearch?.value ?? "";
+    if (context === "index") {
+      input.value = document.querySelector<HTMLInputElement>("#catalog-search")?.value ?? "";
     }
 
     await updateResults();
@@ -1967,26 +2012,22 @@ async function fetchJson<T>(url: string): Promise<T> {
   });
 
   if (!response.ok) {
-    if (response.status === 404 && url.startsWith(DATA_ROOT)) {
-      throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
-    }
-
     const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+    throw new HttpStatusError(url, response.status, message);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   const body = await response.text();
 
   if (url.startsWith(DATA_ROOT) && contentType.includes("text/html")) {
-    throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
+    throw new MirrorDataMissingError(url);
   }
 
   try {
     return JSON.parse(body) as T;
   } catch (error) {
     if (url.startsWith(DATA_ROOT) && /^\s*<!doctype html/i.test(body)) {
-      throw new Error(`Mirror data is missing at ${url}. Run \`npm run data:build\` before previewing the site.`);
+      throw new MirrorDataMissingError(url);
     }
 
     throw new Error(
@@ -1996,7 +2037,14 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 function isMirrorDataMissingError(error: unknown) {
-  return error instanceof Error && error.message.includes("Mirror data is missing");
+  return (
+    error instanceof MirrorDataMissingError ||
+    (error instanceof HttpStatusError && error.status === 404 && error.url.startsWith(DATA_ROOT))
+  );
+}
+
+function isNotFoundForUrl(error: unknown, expectedUrl: string) {
+  return error instanceof HttpStatusError && error.status === 404 && error.url === expectedUrl;
 }
 
 function applySavedTheme() {
