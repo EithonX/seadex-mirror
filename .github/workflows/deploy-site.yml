@@ -49,6 +49,9 @@ jobs:
       - name: Build static mirror data
         run: node scripts/build-static-data.mjs --onUnchanged=materialize --report .mirror-build-report.json
 
+      - name: Verify mirror data
+        run: npm run verify:mirror-data
+
       - name: Build frontend
         run: npm run build:frontend
 

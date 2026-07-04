@@ -61,6 +61,10 @@ jobs:
           skipped="$(node -e "const fs=require('fs'); const report=JSON.parse(fs.readFileSync('.mirror-build-report.json','utf8')); process.stdout.write(String(Boolean(report.skipped)));")"
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
 
+      - name: Verify mirror data
+        if: steps.mirror.outputs.skipped != 'true'
+        run: npm run verify:mirror-data
+
       - name: Build frontend
         if: steps.mirror.outputs.skipped != 'true'
         run: npm run build:frontend
