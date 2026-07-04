@@ -52,6 +52,8 @@ import {
 } from "../../shared/mirror";
 
 const DEFAULT_PAGE_SIZE = 30;
+const FETCH_JSON_TIMEOUT_MS = 20_000;
+const FETCH_JSON_RETRY_DELAYS_MS = [800, 1_600];
 
 type RouteContext =
   | { kind: "index" }
@@ -138,7 +140,7 @@ class HttpStatusError extends FetchJsonError {
     readonly status: number,
     readonly body: string,
   ) {
-    super(body || `Request failed with ${status}`, url);
+    super(`Request failed with ${status} while loading ${url}.`, url);
   }
 }
 
@@ -148,8 +150,27 @@ class MirrorDataMissingError extends FetchJsonError {
   }
 }
 
+class TimeoutError extends FetchJsonError {
+  constructor(url: string) {
+    super(`Timed out loading ${url}`, url);
+  }
+}
+
+class NetworkFetchError extends FetchJsonError {
+  constructor(url: string, message: string) {
+    super(`Failed loading ${url}: ${message}`, url);
+  }
+}
+
+class InvalidJsonError extends FetchJsonError {
+  constructor(url: string, message: string) {
+    super(message, url);
+  }
+}
+
 async function boot() {
   const route = parseRoute(window.location.pathname);
+  renderInitialRouteLoading(route);
   const statusPromise = fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
 
   if (route.kind === "entry") {
@@ -214,6 +235,47 @@ function prefetchEntryPayload(alId: number) {
 
 function getEntryDataUrl(alId: number) {
   return `${DATA_ROOT}/entries/${alId}.json`;
+}
+
+function renderInitialRouteLoading(route: RouteContext) {
+  switch (route.kind) {
+    case "index":
+      setDocumentMeta("SeaDex Mirror");
+      appRoot.innerHTML = renderPageFrame(
+        "index",
+        `
+          <main class="page page--catalog">
+            ${renderCatalogSkeleton()}
+          </main>
+          ${renderSearchDialog()}
+        `,
+      );
+      return;
+    case "entry":
+      appRoot.innerHTML = renderPageFrame(
+        "entry",
+        `
+          <main class="page page--entry">
+            ${renderEntryLoading()}
+          </main>
+          ${renderSearchDialog()}
+        `,
+      );
+      return;
+    case "sheet":
+      setDocumentMeta("Sheet | SeaDex Mirror");
+      document.body.classList.add("is-sheet-page");
+      appRoot.innerHTML = renderPageFrame(
+        "sheet",
+        `
+          ${renderSheetSkeleton()}
+          ${renderSearchDialog()}
+        `,
+      );
+      return;
+    case "about":
+      return;
+  }
 }
 
 // Conservatively prefetch entry payloads for catalog rows/cards as they approach
@@ -1680,9 +1742,52 @@ function loadSheetRenderer() {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-  });
+  const maxAttempts = FETCH_JSON_RETRY_DELAYS_MS.length + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetchJsonOnce<T>(url);
+    } catch (error) {
+      if (attempt >= maxAttempts || !shouldRetryFetchJson(error, url)) {
+        throw error;
+      }
+
+      console.warn(`Retrying mirror data request (${attempt + 1}/${maxAttempts}).`, {
+        url,
+        attempt: attempt + 1,
+        cause: getErrorMessage(error),
+      });
+
+      await delay(FETCH_JSON_RETRY_DELAYS_MS[attempt - 1] ?? 0);
+    }
+  }
+
+  throw new Error(`Failed loading ${url}.`);
+}
+
+async function fetchJsonOnce<T>(url: string): Promise<T> {
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timeout = window.setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, FETCH_JSON_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (didTimeout || isAbortError(error)) {
+      throw new TimeoutError(url);
+    }
+
+    throw new NetworkFetchError(url, getErrorMessage(error));
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const message = await response.text();
@@ -1703,10 +1808,45 @@ async function fetchJson<T>(url: string): Promise<T> {
       throw new MirrorDataMissingError(url);
     }
 
-    throw new Error(
+    throw new InvalidJsonError(
+      url,
       error instanceof Error ? `Invalid JSON returned from ${url}: ${error.message}` : `Invalid JSON returned from ${url}.`,
     );
   }
+}
+
+function shouldRetryFetchJson(error: unknown, url: string) {
+  if (!url.startsWith(DATA_ROOT)) {
+    return false;
+  }
+
+  if (error instanceof TimeoutError || error instanceof NetworkFetchError || error instanceof MirrorDataMissingError) {
+    return true;
+  }
+
+  if (error instanceof HttpStatusError) {
+    return error.status >= 500 && error.status <= 599;
+  }
+
+  if (error instanceof InvalidJsonError) {
+    return true;
+  }
+
+  return false;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function isMirrorDataMissingError(error: unknown) {
