@@ -1,7 +1,6 @@
+import { DEVELOPER_GITHUB_URL } from "./constants";
 import { escapeHtml } from "./html";
 import { renderCloseIcon, renderMoonIcon, renderSearchIcon, renderSunIcon } from "./icons";
-
-const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
 
 export type PageContext = "index" | "entry" | "about" | "sheet";
 

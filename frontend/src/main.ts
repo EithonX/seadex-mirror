@@ -7,6 +7,18 @@ import {
   renderCatalogRow,
   renderFormatOptions,
 } from "./catalog-page";
+import {
+  COMPACT_LAYOUT_MEDIA_QUERY,
+  DATA_ROOT,
+  DEVELOPER_GITHUB_AVATAR_URL,
+  DEVELOPER_GITHUB_URL,
+  DEVELOPER_GITHUB_USERNAME,
+  SEARCH_RESULTS_LIMIT,
+  THEME_KEY,
+  UPSTREAM_ABOUT_URL,
+  UPSTREAM_SHEET_URL,
+  UPSTREAM_SITE_URL,
+} from "./constants";
 import { renderEntryContent, renderEntryError, renderEntryNotFound } from "./entry-page";
 import { formatCatalogFormat, formatDate } from "./format";
 import { debounce, escapeHtml, isTypingTarget, query } from "./html";
@@ -32,17 +44,7 @@ import {
   type SheetWorkbookSheet,
 } from "../../shared/mirror";
 
-const DATA_ROOT = "/mirror-data";
-const COMPACT_LAYOUT_MEDIA_QUERY = "(max-width: 760px)";
 const DEFAULT_PAGE_SIZE = 30;
-const SEARCH_RESULTS_LIMIT = 10;
-const THEME_KEY = "seadex-mirror-theme";
-const UPSTREAM_SITE_URL = "https://releases.moe/";
-const UPSTREAM_ABOUT_URL = "https://releases.moe/about/";
-const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
-const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
-const DEVELOPER_GITHUB_USERNAME = "EithonX";
-const DEVELOPER_GITHUB_AVATAR_URL = "https://github.com/EithonX.png";
 
 type RouteContext =
   | { kind: "index" }
