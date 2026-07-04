@@ -7,6 +7,9 @@
 /mirror-data/sheet.json
   Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
 
+/mirror-data/sheet-workbook.json
+  Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+
 /mirror-data/status.json
   Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
 
