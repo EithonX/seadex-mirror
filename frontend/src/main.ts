@@ -92,9 +92,13 @@ const appRoot = app;
 let cachedCatalogPromise: Promise<CatalogIndexPayload> | null = null;
 let cachedSheetWorkbookPromise: Promise<SheetWorkbookPayload> | null = null;
 let cachedSheetRendererPromise: Promise<typeof import("./sheet-workbook")> | null = null;
+const entryPayloadCache = new Map<number, Promise<EntryPayload>>();
+const entryPrefetchAttempts = new Set<number>();
 const groupSummaryCache = new Map<number, CatalogGroupSummary>();
 const groupSummaryInflight = new Map<number, Promise<void>>();
 let globalKeydownCleanup: (() => void) | null = null;
+const wiredCatalogActionRoots = new WeakSet<HTMLElement>();
+let catalogMenuOutsideClickWired = false;
 
 applySavedTheme();
 
@@ -158,12 +162,37 @@ async function boot() {
 
 function loadEntryPayload(alId: number) {
   const url = getEntryDataUrl(alId);
-  const result = fetchJson<EntryPayload>(url).then(
+  const result = loadCachedEntryPayload(alId).then(
     (payload): EntryPayloadResult => ({ ok: true, payload }),
     (error: unknown): EntryPayloadResult => ({ ok: false, error }),
   );
 
   return { url, result };
+}
+
+function loadCachedEntryPayload(alId: number) {
+  const cached = entryPayloadCache.get(alId);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = fetchJson<EntryPayload>(getEntryDataUrl(alId)).catch((error: unknown) => {
+    entryPayloadCache.delete(alId);
+    throw error;
+  });
+  entryPayloadCache.set(alId, promise);
+  return promise;
+}
+
+function prefetchEntryPayload(alId: number) {
+  if (entryPrefetchAttempts.has(alId)) {
+    return;
+  }
+
+  entryPrefetchAttempts.add(alId);
+  loadCachedEntryPayload(alId).catch((error: unknown) => {
+    console.debug("Entry prefetch failed.", { alId, error });
+  });
 }
 
 function getEntryDataUrl(alId: number) {
@@ -1012,7 +1041,7 @@ function renderCatalogRow(item: CatalogItem) {
   const posterSrc = item.coverImage?.extraLarge ?? "";
 
   return `
-    <tr class="catalog-row" data-entry-link="/${item.alId}" tabindex="0">
+    <tr class="catalog-row" data-entry-link="/${item.alId}" data-entry-id="${item.alId}" tabindex="0">
       <td>
         <div class="catalog-title">
           ${posterSrc ? `<img src="${escapeHtml(posterSrc)}" class="catalog-title__poster" alt="" loading="lazy" />` : `<div class="catalog-title__poster catalog-title__poster--fallback"></div>`}
@@ -1054,7 +1083,7 @@ function renderCatalogMobileCard(item: CatalogItem) {
   const posterSrc = item.coverImage?.extraLarge ?? "";
 
   return `
-    <article class="catalog-mobile-item" data-entry-link="/${item.alId}" tabindex="0">
+    <article class="catalog-mobile-item" data-entry-link="/${item.alId}" data-entry-id="${item.alId}" tabindex="0">
       <div class="catalog-mobile-item__poster">
         ${posterSrc ? `<img src="${escapeHtml(posterSrc)}" alt="" loading="lazy" />` : `<div class="catalog-mobile-item__poster-fallback"></div>`}
       </div>
@@ -1681,74 +1710,192 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
 }
 
 function wireCatalogActions(body: HTMLElement, mobileList: HTMLElement) {
-  const attachRowHandlers = (root: ParentNode) => {
-    root.querySelectorAll<HTMLElement>("[data-entry-link]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        const target = event.target as HTMLElement | null;
-        if (target?.closest("[data-menu-toggle]") || target?.closest(".row-menu")) {
-          return;
-        }
-        const href = element.dataset.entryLink;
-        if (href) {
-          window.location.href = href;
-        }
-      });
-
-      element.addEventListener("keydown", (event) => {
-        const keyboardEvent = event as KeyboardEvent;
-        if (keyboardEvent.key !== "Enter" && keyboardEvent.key !== " ") {
-          return;
-        }
-        keyboardEvent.preventDefault();
-        const href = element.dataset.entryLink;
-        if (href) {
-          window.location.href = href;
-        }
-      });
-    });
-  };
-
-  const closeAllMenus = () => {
-    document.querySelectorAll<HTMLElement>(".row-menu").forEach((menu) => {
-      menu.hidden = true;
-    });
-  };
-
-  document.querySelectorAll<HTMLElement>("[data-menu-toggle]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const menuId = button.dataset.menuId;
-      if (!menuId) {
-        return;
-      }
-
-      const menu = document.getElementById(menuId);
-      if (!menu) {
-        return;
-      }
-
-      const willOpen = menu.hidden;
-      closeAllMenus();
-      menu.hidden = !willOpen;
-    });
-  });
-
-  document.addEventListener(
-    "click",
-    (event) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest(".row-menu-shell")) {
-        return;
-      }
-      closeAllMenus();
-    },
-    { once: true },
-  );
-
-  attachRowHandlers(body);
+  attachCatalogActionRoot(body);
   if (mobileList !== body) {
-    attachRowHandlers(mobileList);
+    attachCatalogActionRoot(mobileList);
   }
+
+  if (!catalogMenuOutsideClickWired) {
+    document.addEventListener("click", closeCatalogMenusOnOutsideClick);
+    catalogMenuOutsideClickWired = true;
+  }
+}
+
+function attachCatalogActionRoot(root: HTMLElement) {
+  if (wiredCatalogActionRoots.has(root)) {
+    return;
+  }
+
+  root.addEventListener("click", handleCatalogRootClick);
+  root.addEventListener("auxclick", handleCatalogRootAuxClick);
+  root.addEventListener("keydown", handleCatalogRootKeydown);
+  root.addEventListener("pointerenter", handleCatalogEntryIntent, true);
+  root.addEventListener("focusin", handleCatalogEntryIntent);
+  root.addEventListener("pointerdown", handleCatalogEntryPointerDown);
+  wiredCatalogActionRoots.add(root);
+}
+
+function handleCatalogRootClick(event: MouseEvent) {
+  const target = getCatalogEventTarget(event);
+  if (!target) {
+    return;
+  }
+
+  const menuToggle = getCatalogMenuToggle(target);
+  if (menuToggle) {
+    event.preventDefault();
+    toggleCatalogRowMenu(menuToggle);
+    return;
+  }
+
+  const entry = getCatalogEntryFromTarget(target);
+  if (!entry || shouldIgnoreCatalogEntryTarget(target, entry) || event.defaultPrevented || event.button !== 0) {
+    return;
+  }
+
+  const href = entry.dataset.entryLink;
+  if (!href) {
+    return;
+  }
+
+  event.preventDefault();
+  openCatalogEntry(href, event);
+}
+
+function handleCatalogRootAuxClick(event: MouseEvent) {
+  if (event.button !== 1) {
+    return;
+  }
+
+  const target = getCatalogEventTarget(event);
+  if (!target) {
+    return;
+  }
+
+  const entry = getCatalogEntryFromTarget(target);
+  if (!entry || shouldIgnoreCatalogEntryTarget(target, entry) || event.defaultPrevented) {
+    return;
+  }
+
+  const href = entry.dataset.entryLink;
+  if (!href) {
+    return;
+  }
+
+  event.preventDefault();
+  openCatalogEntry(href, event);
+}
+
+function handleCatalogRootKeydown(event: KeyboardEvent) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const target = getCatalogEventTarget(event);
+  if (!target) {
+    return;
+  }
+
+  const entry = getCatalogEntryFromTarget(target);
+  if (!entry || shouldIgnoreCatalogEntryTarget(target, entry)) {
+    return;
+  }
+
+  const href = entry.dataset.entryLink;
+  if (!href) {
+    return;
+  }
+
+  event.preventDefault();
+  openCatalogEntry(href, event);
+}
+
+function handleCatalogEntryIntent(event: Event) {
+  const target = getCatalogEventTarget(event);
+  if (!target) {
+    return;
+  }
+
+  prefetchCatalogEntryFromTarget(target);
+}
+
+function handleCatalogEntryPointerDown(event: PointerEvent) {
+  if (event.pointerType !== "touch") {
+    return;
+  }
+
+  handleCatalogEntryIntent(event);
+}
+
+function prefetchCatalogEntryFromTarget(target: Element) {
+  const entry = getCatalogEntryFromTarget(target);
+  if (!entry) {
+    return;
+  }
+
+  const alId = Number(entry.dataset.entryId);
+  if (Number.isFinite(alId)) {
+    prefetchEntryPayload(alId);
+  }
+}
+
+function getCatalogEventTarget(event: Event) {
+  return event.target instanceof Element ? event.target : null;
+}
+
+function getCatalogEntryFromTarget(target: Element) {
+  return target.closest<HTMLElement>("[data-entry-link]");
+}
+
+function getCatalogMenuToggle(target: Element) {
+  return target.closest<HTMLButtonElement>("[data-menu-toggle]");
+}
+
+function shouldIgnoreCatalogEntryTarget(target: Element, entry: HTMLElement) {
+  const interactive = target.closest<HTMLElement>(
+    "a, button, input, select, textarea, [data-menu-toggle], .row-menu, .row-menu-shell",
+  );
+  return Boolean(interactive && entry.contains(interactive));
+}
+
+function openCatalogEntry(href: string, event: MouseEvent | KeyboardEvent) {
+  if (event.metaKey || event.ctrlKey || ("button" in event && event.button === 1)) {
+    window.open(href, "_blank", "noopener");
+    return;
+  }
+
+  window.location.assign(href);
+}
+
+function toggleCatalogRowMenu(button: HTMLElement) {
+  const menuId = button.dataset.menuId;
+  if (!menuId) {
+    return;
+  }
+
+  const menu = document.getElementById(menuId);
+  if (!menu) {
+    return;
+  }
+
+  const willOpen = menu.hidden;
+  closeCatalogRowMenus();
+  menu.hidden = !willOpen;
+}
+
+function closeCatalogMenusOnOutsideClick(event: MouseEvent) {
+  const target = getCatalogEventTarget(event);
+  if (target?.closest(".row-menu-shell")) {
+    return;
+  }
+
+  closeCatalogRowMenus();
+}
+
+function closeCatalogRowMenus() {
+  document.querySelectorAll<HTMLElement>(".row-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
 }
 
 function readCatalogStateFromUrl(): CatalogState {
