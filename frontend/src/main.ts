@@ -1,4 +1,5 @@
 import "./styles.css";
+import { renderPageFrame, renderSearchDialog } from "./app-shell";
 import {
   buildSeasonOptions,
   buildYearOptions,
@@ -12,16 +13,13 @@ import { debounce, escapeHtml, isTypingTarget, query } from "./html";
 import {
   renderChevronLeftIcon,
   renderChevronRightIcon,
-  renderCloseIcon,
   renderDoubleChevronLeftIcon,
   renderDoubleChevronRightIcon,
   renderExternalIcon,
   renderGithubIcon,
   renderLogInIcon,
   renderMixerIcon,
-  renderMoonIcon,
   renderSearchIcon,
-  renderSunIcon,
 } from "./icons";
 import {
   filterCatalogItems,
@@ -214,7 +212,6 @@ async function renderCatalog(status: MirrorStatus) {
   const yearOptions = buildYearOptions(catalog.items);
 
   appRoot.innerHTML = renderPageFrame(
-    status,
     "index",
     `
       <main class="page page--catalog">
@@ -513,7 +510,6 @@ async function renderSheet(status: MirrorStatus) {
   const creditUrl = workbook.credit?.url ?? null;
 
   appRoot.innerHTML = renderPageFrame(
-    status,
     "sheet",
     `
       <main class="page page--sheet">
@@ -626,7 +622,6 @@ function renderAbout(status: MirrorStatus) {
   const rebuiltLabel = status.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : "Unknown";
 
   appRoot.innerHTML = renderPageFrame(
-    status,
     "about",
     `
       <main class="page page--about">
@@ -765,7 +760,6 @@ async function renderEntry(
   entryUrl: string,
 ) {
   appRoot.innerHTML = renderPageFrame(
-    status,
     "entry",
     `
       <main class="page page--entry">
@@ -788,7 +782,6 @@ async function renderEntry(
     setDocumentMeta(`${entry.titles.display} | SeaDex Mirror`);
 
     appRoot.innerHTML = renderPageFrame(
-      status,
       "entry",
       `
         ${renderEntryContent(payload, status)}
@@ -800,7 +793,6 @@ async function renderEntry(
   } catch (error) {
     if (isNotFoundForUrl(error, entryUrl)) {
       appRoot.innerHTML = renderPageFrame(
-        status,
         "entry",
         `
           ${renderEntryNotFound(alId)}
@@ -821,7 +813,6 @@ async function renderEntry(
     }
 
     appRoot.innerHTML = renderPageFrame(
-      status,
       "entry",
       `
         ${renderEntryError(alId, displayMessage)}
@@ -832,68 +823,6 @@ async function renderEntry(
     setDocumentMeta(`Error | SeaDex Mirror`);
   }
 }
-
-function renderPageFrame(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet", content: string) {
-  return `
-    ${renderShell(status, context)}
-    ${content}
-  `;
-}
-
-function renderShell(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
-  const originalSiteUrl = normalizeExternalUrl(status.mirror.originalSite || UPSTREAM_SITE_URL);
-  return `
-    <header class="site-header">
-      <div class="site-header__inner">
-        <div class="site-header__brand">
-          <a href="/" class="brand-link" aria-label="SeaDex mirror home">
-            <span class="brand-mark"><img src="/favicon.png" alt="SeaDex logo" /></span>
-            <span class="brand-label">SeaDex</span>
-          </a>
-          <nav class="site-nav" aria-label="Primary navigation">
-            <a href="/about"${context === "about" ? ` aria-current="page"` : ""}>About</a>
-            <a href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">GitHub</a>
-            <a href="/sheet"${context === "sheet" ? ` aria-current="page"` : ""}>Sheet</a>
-          </nav>
-        </div>
-
-        <button id="global-search-trigger" class="header-search" type="button" aria-haspopup="dialog" aria-controls="search-dialog" aria-expanded="false">
-          ${renderSearchIcon()}
-          <span>Search anime...</span>
-        </button>
-
-        <div class="site-header__actions">
-          <button id="theme-toggle" class="ghost-icon-button" type="button" aria-label="Toggle theme">
-            <span class="theme-sun">${renderSunIcon()}</span>
-            <span class="theme-moon">${renderMoonIcon()}</span>
-          </button>
-        </div>
-      </div>
-    </header>
-  `;
-}
-
-function renderSearchDialog() {
-  return `
-    <div id="search-dialog" class="search-dialog" hidden aria-hidden="true">
-      <div class="search-dialog__backdrop" data-search-close></div>
-      <div class="search-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="search-dialog-title">
-        <div class="search-dialog__header">
-          <h2 id="search-dialog-title">Search anime</h2>
-          <button type="button" class="ghost-icon-button" data-search-close aria-label="Close search">${renderCloseIcon()}</button>
-        </div>
-        <label class="control-shell control-shell--search control-shell--dialog" for="dialog-search-input">
-          ${renderSearchIcon()}
-          <input id="dialog-search-input" class="control-input" type="search" placeholder="Type a title, year, or note fragment..." autocomplete="off" />
-        </label>
-        <div class="search-dialog__meta" id="dialog-search-meta">Start typing to search the mirrored catalog.</div>
-        <div id="dialog-search-results" class="search-results"></div>
-      </div>
-    </div>
-  `;
-}
-
-
 
 function renderFatal(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -1492,18 +1421,6 @@ function normalizeSort(value: string | null) {
 
 function setDocumentMeta(title: string) {
   document.title = title;
-}
-
-function normalizeExternalUrl(value: string) {
-  if (!value) {
-    return UPSTREAM_SITE_URL;
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    return value;
-  }
-
-  return `https://${value.replace(/^\/+/, "")}`;
 }
 
 function initializeCustomDropdowns() {
