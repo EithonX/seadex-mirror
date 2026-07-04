@@ -78,11 +78,6 @@ type EntryPayloadResult =
   | { ok: true; payload: EntryPayload }
   | { ok: false; error: unknown };
 
-type CatalogGroupSummary = {
-  bestLabel: string;
-  altLabel: string;
-};
-
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("App root not found.");
@@ -94,8 +89,6 @@ let cachedSheetWorkbookPromise: Promise<SheetWorkbookPayload> | null = null;
 let cachedSheetRendererPromise: Promise<typeof import("./sheet-workbook")> | null = null;
 const entryPayloadCache = new Map<number, Promise<EntryPayload>>();
 const entryPrefetchAttempts = new Set<number>();
-const groupSummaryCache = new Map<number, CatalogGroupSummary>();
-const groupSummaryInflight = new Map<number, Promise<void>>();
 let globalKeydownCleanup: (() => void) | null = null;
 const wiredCatalogActionRoots = new WeakSet<HTMLElement>();
 let catalogMenuOutsideClickWired = false;
@@ -1039,6 +1032,7 @@ function renderCatalogRow(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "-";
   const posterSrc = item.coverImage?.extraLarge ?? "";
+  const menuId = `row-menu-${item.alId}`;
 
   return `
     <tr class="catalog-row" data-entry-link="/${item.alId}" data-entry-id="${item.alId}" tabindex="0">
@@ -1059,15 +1053,15 @@ function renderCatalogRow(item: CatalogItem) {
       <td>${formatDate(item.sourceUpdatedAt)}</td>
       <td class="catalog-row__actions">
         <div class="row-menu-shell">
-          <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="row-menu-${item.alId}">
+          <button class="row-menu-toggle" type="button" aria-label="Open row menu" aria-expanded="false" aria-controls="${menuId}" data-menu-toggle data-menu-id="${menuId}">
             ${renderDotsIcon()}
           </button>
-          <div id="row-menu-${item.alId}" class="row-menu" hidden>
-            <a href="/${item.alId}">Open entry</a>
-            <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+          <div id="${menuId}" class="row-menu" role="menu" hidden>
+            <a href="/${item.alId}" role="menuitem">Open entry</a>
+            <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer" role="menuitem">AniList</a>
             ${
               item.comparisonLinks[0]
-                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer">First comparison</a>`
+                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer" role="menuitem">First comparison</a>`
                 : ""
             }
           </div>
@@ -1081,6 +1075,7 @@ function renderCatalogMobileCard(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "Unknown";
   const posterSrc = item.coverImage?.extraLarge ?? "";
+  const menuId = `mobile-row-menu-${item.alId}`;
 
   return `
     <article class="catalog-mobile-item" data-entry-link="/${item.alId}" data-entry-id="${item.alId}" tabindex="0">
@@ -1095,15 +1090,15 @@ function renderCatalogMobileCard(item: CatalogItem) {
       
       <div class="catalog-mobile-item__action">
         <div class="row-menu-shell">
-          <button class="row-menu-toggle" type="button" aria-label="Open row menu" data-menu-toggle data-menu-id="mobile-row-menu-${item.alId}">
+          <button class="row-menu-toggle" type="button" aria-label="Open row menu" aria-expanded="false" aria-controls="${menuId}" data-menu-toggle data-menu-id="${menuId}">
             ${renderDotsIcon()}
           </button>
-          <div id="mobile-row-menu-${item.alId}" class="row-menu row-menu--mobile" hidden>
-            <a href="/${item.alId}">Open entry</a>
-            <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer">AniList</a>
+          <div id="${menuId}" class="row-menu row-menu--mobile" role="menu" hidden>
+            <a href="/${item.alId}" role="menuitem">Open entry</a>
+            <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer" role="menuitem">AniList</a>
             ${
               item.comparisonLinks[0]
-                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer">First comparison</a>`
+                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer" role="menuitem">First comparison</a>`
                 : ""
             }
           </div>
@@ -1564,7 +1559,7 @@ function wireThemeToggle() {
     const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
     const next = current === "dark" ? "light" : "dark";
     applyTheme(next);
-    window.localStorage.setItem(THEME_KEY, next);
+    saveTheme(next);
   });
 }
 
@@ -1582,9 +1577,6 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
   let isOpen = false;
 
   const closeDialog = () => {
-    if (!isOpen) {
-      return;
-    }
     dialog.hidden = true;
     dialog.setAttribute("aria-hidden", "true");
     trigger.setAttribute("aria-expanded", "false");
@@ -1700,6 +1692,7 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
     }
 
     if (event.key === "Escape" && isOpen) {
+      event.preventDefault();
       closeDialog();
     }
   };
@@ -1881,6 +1874,7 @@ function toggleCatalogRowMenu(button: HTMLElement) {
   const willOpen = menu.hidden;
   closeCatalogRowMenus();
   menu.hidden = !willOpen;
+  button.setAttribute("aria-expanded", String(willOpen));
 }
 
 function closeCatalogMenusOnOutsideClick(event: MouseEvent) {
@@ -1895,6 +1889,9 @@ function closeCatalogMenusOnOutsideClick(event: MouseEvent) {
 function closeCatalogRowMenus() {
   document.querySelectorAll<HTMLElement>(".row-menu").forEach((menu) => {
     menu.hidden = true;
+  });
+  document.querySelectorAll<HTMLElement>("[data-menu-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", "false");
   });
 }
 
@@ -2017,71 +2014,22 @@ function buildYearOptions(items: CatalogIndexItem[]) {
     }));
 }
 
-function readGroupSummary(item: CatalogItem): CatalogGroupSummary {
+function readGroupSummary(item: CatalogItem) {
   const bestGroups = item.bestGroups ?? [];
   const altGroups = item.altGroups ?? [];
 
-  if (bestGroups.length || altGroups.length || item.torrentCount === 0) {
-    return {
-      bestLabel: bestGroups.length
-        ? (bestGroups[0] ?? "")
-        : item.bestTorrentCount
-          ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}`
-          : "",
-      altLabel: altGroups.length
-        ? (altGroups[0] ?? "")
-        : item.torrentCount - item.bestTorrentCount > 0
-          ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}`
-          : "",
-    };
-  }
-
-  return (
-    groupSummaryCache.get(item.alId) ?? {
-      bestLabel: item.bestTorrentCount ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}` : "",
-      altLabel: item.torrentCount - item.bestTorrentCount > 0 ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}` : "",
-    }
-  );
-}
-
-async function ensureGroupSummaries(items: CatalogItem[]) {
-  const tasks = items.map((item) => ensureGroupSummary(item.alId));
-  await Promise.all(tasks);
-}
-
-async function ensureGroupSummary(alId: number) {
-  if (groupSummaryCache.has(alId)) {
-    return;
-  }
-
-  const existing = groupSummaryInflight.get(alId);
-  if (existing) {
-    await existing;
-    return;
-  }
-
-  const inflight = fetchJson<EntryPayload>(`${DATA_ROOT}/entries/${alId}.json`)
-    .then((payload) => {
-      const best = uniqueReleaseGroups(payload.torrents.filter((torrent) => torrent.isBest));
-      const alt = uniqueReleaseGroups(payload.torrents.filter((torrent) => !torrent.isBest));
-      groupSummaryCache.set(alId, {
-        bestLabel: best[0] ?? "",
-        altLabel: alt[0] ?? "",
-      });
-    })
-    .finally(() => {
-      groupSummaryInflight.delete(alId);
-    });
-
-  groupSummaryInflight.set(alId, inflight);
-  await inflight;
-}
-
-function uniqueReleaseGroups(torrents: EntryPayload["torrents"]) {
-  return [...new Set(sortTorrentsLikeUpstream(torrents).map((torrent) => torrent.releaseGroup).filter(Boolean))].slice(
-    0,
-    2,
-  );
+  return {
+    bestLabel: bestGroups.length
+      ? (bestGroups[0] ?? "")
+      : item.bestTorrentCount
+        ? `${item.bestTorrentCount} release${item.bestTorrentCount === 1 ? "" : "s"}`
+        : "",
+    altLabel: altGroups.length
+      ? (altGroups[0] ?? "")
+      : item.torrentCount - item.bestTorrentCount > 0
+        ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}`
+        : "",
+  };
 }
 
 function classifyTorrentLinks(torrent: EntryPayload["torrents"][number], preferGrouped = false) {
@@ -2201,8 +2149,24 @@ function isNotFoundForUrl(error: unknown, expectedUrl: string) {
 }
 
 function applySavedTheme() {
-  const saved = window.localStorage.getItem(THEME_KEY);
+  const saved = readSavedTheme();
   applyTheme(saved === "light" ? "light" : "dark");
+}
+
+function readSavedTheme() {
+  try {
+    return window.localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveTheme(theme: "dark" | "light") {
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Theme persistence is optional; keep runtime theme applied.
+  }
 }
 
 function applyTheme(theme: "dark" | "light") {
@@ -2477,7 +2441,7 @@ function renderGithubIcon() {
 
 function initializeCustomDropdowns() {
   const selects = document.querySelectorAll<HTMLSelectElement>(
-    ".catalog-toolbar select:not(.custom-select-initialized)"
+    ".catalog-toolbar select:not(.custom-select-initialized)",
   );
 
   selects.forEach((select) => {
@@ -2494,7 +2458,7 @@ function initializeCustomDropdowns() {
     const iconHtml = iconSvg ? iconSvg.outerHTML : "";
 
     const wrapper = document.createElement("div");
-    wrapper.className = parent.className;    
+    wrapper.className = parent.className;
     wrapper.classList.add("custom-select");
     if (isDashed) {
       wrapper.classList.add("custom-select--dashed");
@@ -2523,7 +2487,7 @@ function initializeCustomDropdowns() {
       triggerContentHtml += iconHtml;
       wrapper.classList.add("custom-select--has-icon");
     }
-    
+
     triggerContentHtml += `<span class="custom-select__trigger-text"></span>`;
     triggerContentHtml += `<span class="custom-select__arrow"></span>`;
     trigger.innerHTML = triggerContentHtml;
@@ -2537,7 +2501,7 @@ function initializeCustomDropdowns() {
 
     const syncOptions = () => {
       dropdown.innerHTML = "";
-      
+
       const scrollWrapper = document.createElement("div");
       scrollWrapper.className = "custom-select__dropdown-scroll";
       dropdown.appendChild(scrollWrapper);
@@ -2549,7 +2513,7 @@ function initializeCustomDropdowns() {
         optionEl.className = "custom-select__option";
         optionEl.setAttribute("data-value", opt.value);
         optionEl.setAttribute("role", "option");
-        
+
         const isSelected = opt.selected;
         if (isSelected) {
           optionEl.classList.add("is-selected");
@@ -2625,11 +2589,15 @@ function initializeCustomDropdowns() {
       const isOpen = wrapper.hasAttribute("data-open");
       const optionsArray = Array.from(dropdown.querySelectorAll<HTMLDivElement>(".custom-select__option"));
       let focusedIndex = optionsArray.findIndex(o => o.classList.contains("is-focused"));
+      const hasOptions = optionsArray.length > 0;
 
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         if (!isOpen) {
           openDropdown();
+          return;
+        }
+        if (!hasOptions) {
           return;
         }
 
@@ -2644,7 +2612,7 @@ function initializeCustomDropdowns() {
         newFocused?.classList.add("is-focused");
         newFocused?.scrollIntoView({ block: "nearest" });
       } else if (e.key === "Home" || e.key === "End") {
-        if (isOpen) {
+        if (isOpen && hasOptions) {
           e.preventDefault();
           focusedIndex = e.key === "Home" ? 0 : optionsArray.length - 1;
           optionsArray.forEach(o => o.classList.remove("is-focused"));
@@ -2653,7 +2621,7 @@ function initializeCustomDropdowns() {
           newFocused?.scrollIntoView({ block: "nearest" });
         }
       } else if (e.key === "PageUp" || e.key === "PageDown") {
-        if (isOpen) {
+        if (isOpen && hasOptions) {
           e.preventDefault();
           const step = 10;
           if (e.key === "PageDown") {
@@ -2671,6 +2639,9 @@ function initializeCustomDropdowns() {
         if (!isOpen) {
           openDropdown();
         } else {
+          if (!hasOptions) {
+            return;
+          }
           const newFocused = optionsArray[focusedIndex];
           if (newFocused) {
             const val = newFocused.getAttribute("data-value") || "";
@@ -2689,6 +2660,9 @@ function initializeCustomDropdowns() {
         const char = e.key.toLowerCase();
         if (!isOpen) {
           openDropdown();
+        }
+        if (!hasOptions) {
+          return;
         }
 
         const startIndex = (focusedIndex + 1) % optionsArray.length;

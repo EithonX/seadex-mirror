@@ -138,16 +138,6 @@ export function renderSheetWorkbookGrid(
   return renderCatalogLikeSheet(sheet, searchQuery);
 }
 
-export function formatSheetWorkbookStats(sheet: SheetWorkbookSheet) {
-  if (sheet.slug === "notes") {
-    const { notes, legend } = getNotesSheetModel(sheet);
-    return `${notes.length.toLocaleString()} notes · ${legend.length.toLocaleString()} legend`;
-  }
-
-  const { rows } = getCatalogSheetModel(sheet);
-  return `${rows.length.toLocaleString()} entries · ${rows[0]?.cells.length.toLocaleString() ?? "0"} columns`;
-}
-
 function renderCatalogLikeSheet(sheet: SheetWorkbookSheet, searchQuery: string): RenderSheetWorkbookGridResult {
   const { visibleColumns, groups, groupedColumnIndexes, numberColumnWidth, headerHtml, colgroupHtml } =
     getCatalogSheetModel(sheet);
