@@ -33,6 +33,18 @@ Build the frontend:
 npm run build:frontend
 ```
 
+Verify generated mirror data:
+
+```bash
+npm run verify:mirror-data
+```
+
+Verify frontend build output:
+
+```bash
+npm run verify:frontend-build
+```
+
 Build a deployable site snapshot:
 
 ```bash
@@ -62,7 +74,7 @@ npm run deploy
 The intended flow is:
 
 1. run [`scripts/build-static-data.mjs`](scripts/build-static-data.mjs)
-2. write `status.json`, `catalog.json`, and `entries/<anilist-id>.json` into `frontend/public/mirror-data`
+2. write `status.json`, `catalog.json`, `sheet-workbook.json`, and `entries/<anilist-id>.json` into `frontend/public/mirror-data`
 3. build the frontend with Vite
 4. deploy the static output to Cloudflare Pages
 
@@ -82,6 +94,23 @@ The static data builder:
 - fetches AniList only for SeaDex entry IDs
 - enriches relation data for extra franchise context on entry pages
 - writes a full clean snapshot into static JSON files
+
+## Frontend data loading
+
+- Catalog pages read `catalog.json` for table filtering and global search.
+- Entry pages load `entries/<alId>.json` directly, without loading `catalog.json`.
+- `/sheet` loads `sheet-workbook.json` and lazy-loads the sheet workbook renderer as a separate frontend chunk.
+
+`npm run verify:mirror-data` checks that the expected generated JSON files exist and have the basic shape the frontend needs. `npm run verify:frontend-build` checks that the production build keeps the sheet renderer in its lazy chunk.
+
+## Cache policy
+
+Cloudflare Pages headers keep freshness short for top-level mirror indexes:
+
+- `catalog.json`, `status.json`, and `sheet-workbook.json`: 60 seconds
+- `entries/*`: 900 seconds
+
+Hashed frontend assets are cached immutably.
 
 ## Automation
 
