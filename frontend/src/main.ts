@@ -19,7 +19,7 @@ import {
   UPSTREAM_SHEET_URL,
   UPSTREAM_SITE_URL,
 } from "./constants";
-import { renderEntryContent, renderEntryError, renderEntryNotFound } from "./entry-page";
+import { renderEntryContent, renderEntryError, renderEntryLoading, renderEntryNotFound } from "./entry-page";
 import { formatCatalogFormat, formatDate } from "./format";
 import { debounce, escapeHtml, isTypingTarget, query } from "./html";
 import {
@@ -765,7 +765,7 @@ async function renderEntry(
     "entry",
     `
       <main class="page page--entry">
-        <div class="entry-loading">Loading mirrored entry...</div>
+        ${renderEntryLoading()}
       </main>
       ${renderSearchDialog()}
     `,

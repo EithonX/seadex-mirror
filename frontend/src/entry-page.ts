@@ -164,6 +164,67 @@ export function renderEntryContent(payload: EntryPayload, status: MirrorStatus):
   `;
 }
 
+export function renderEntryLoading(): string {
+  const skeletonBlock = (extraClass: string) => `<div class="skeleton-block ${extraClass}"></div>`;
+  const metaRows = [0, 1, 2]
+    .map(
+      () => `
+        <div class="entry-skeleton__meta-row">
+          ${skeletonBlock("skeleton-line skeleton-line--meta")}
+          ${skeletonBlock("skeleton-line skeleton-line--meta")}
+        </div>
+      `,
+    )
+    .join("");
+  const chips = [0, 1, 2]
+    .map(() => skeletonBlock("skeleton-chip"))
+    .join("");
+  const links = [0, 1]
+    .map(() => skeletonBlock("skeleton-link"))
+    .join("");
+  const torrentCards = [0, 1, 2, 3]
+    .map(
+      () => `
+        <div class="skeleton-torrent-card">
+          ${skeletonBlock("skeleton-line skeleton-line--card-title")}
+          <div class="skeleton-torrent-card__badges">
+            ${skeletonBlock("skeleton-chip skeleton-chip--sm")}
+            ${skeletonBlock("skeleton-chip skeleton-chip--sm")}
+          </div>
+          ${skeletonBlock("skeleton-torrent-card__action")}
+        </div>
+      `,
+    )
+    .join("");
+
+  return `
+    <div class="entry-skeleton" aria-busy="true">
+      <span class="skeleton-sr">Loading mirrored entry...</span>
+      <div class="entry-layout" aria-hidden="true">
+        <aside class="entry-sidebar entry-skeleton__sidebar">
+          ${skeletonBlock("skeleton-poster")}
+          <div class="entry-skeleton__title">
+            ${skeletonBlock("skeleton-line skeleton-line--title")}
+            ${skeletonBlock("skeleton-line skeleton-line--subtitle")}
+          </div>
+          <div class="entry-skeleton__chips">${chips}</div>
+          <div class="entry-skeleton__meta">${metaRows}</div>
+          <div class="entry-skeleton__links">${links}</div>
+        </aside>
+        <section class="entry-main entry-skeleton__main">
+          ${skeletonBlock("skeleton-line skeleton-heading")}
+          <div class="skeleton-torrent-grid">${torrentCards}</div>
+          ${skeletonBlock("skeleton-line skeleton-heading")}
+          ${skeletonBlock("skeleton-notes")}
+        </section>
+      </div>
+      <div class="entry-skeleton__footer">
+        ${skeletonBlock("skeleton-line skeleton-line--footer")}
+      </div>
+    </div>
+  `;
+}
+
 function renderComparisonsSection(links: string[]) {
   return `
     <hr class="section-rule" />
