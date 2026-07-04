@@ -36,10 +36,15 @@ import {
   renderSearchIcon,
 } from "./icons";
 import {
+  defaultSortOrder,
   filterCatalogItems,
+  normalizeCatalogSort,
+  normalizeCatalogSortOrder,
   type CatalogIndexItem,
   type CatalogIndexPayload,
   type CatalogPayload,
+  type CatalogSort,
+  type CatalogSortOrder,
   type EntryPayload,
   type MirrorStatus,
   type SheetWorkbookPayload,
@@ -59,10 +64,25 @@ type CatalogState = {
   format: string;
   season: string;
   year: string;
-  sort: string;
+  sort: CatalogSort;
+  order: CatalogSortOrder;
   limit: number;
   offset: number;
 };
+
+type SortableColumn = {
+  field: CatalogSort;
+  label: string;
+};
+
+// Header columns that participate in sorting. Best/Alt/action columns are intentionally excluded.
+const SORTABLE_COLUMNS: SortableColumn[] = [
+  { field: "title", label: "Title" },
+  { field: "format", label: "Format" },
+  { field: "year", label: "Year" },
+  { field: "episodes", label: "Episodes" },
+  { field: "updated", label: "Updated" },
+];
 
 type SheetWorkbookState = {
   tab: string;
@@ -318,7 +338,9 @@ async function renderCatalog(status: MirrorStatus) {
                     <select id="catalog-sort">
                       <option value="updated"${state.sort === "updated" ? " selected" : ""}>Latest updates</option>
                       <option value="title"${state.sort === "title" ? " selected" : ""}>Alphabetical</option>
+                      <option value="format"${state.sort === "format" ? " selected" : ""}>Format</option>
                       <option value="year"${state.sort === "year" ? " selected" : ""}>Newest year</option>
+                      <option value="episodes"${state.sort === "episodes" ? " selected" : ""}>Most episodes</option>
                       <option value="score"${state.sort === "score" ? " selected" : ""}>Highest score</option>
                     </select>
                   </label>
@@ -327,18 +349,20 @@ async function renderCatalog(status: MirrorStatus) {
             </div>
           </div>
 
+          <div class="catalog-active-filters" id="catalog-active-filters" hidden></div>
+
           <section class="catalog-table-shell">
             <div class="catalog-table-shell__scroll">
               <table class="catalog-table" aria-label="SeaDex mirror catalog">
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Format</th>
-                    <th>Year</th>
-                    <th>Episodes</th>
+                    ${renderSortableHeader("title", "Title", state)}
+                    ${renderSortableHeader("format", "Format", state)}
+                    ${renderSortableHeader("year", "Year", state)}
+                    ${renderSortableHeader("episodes", "Episodes", state)}
                     <th>Best</th>
                     <th>Alt</th>
-                    <th>Updated</th>
+                    ${renderSortableHeader("updated", "Updated", state)}
                     <th></th>
                   </tr>
                 </thead>
@@ -418,7 +442,7 @@ async function renderCatalog(status: MirrorStatus) {
     state.format = formatSelect.value;
     state.season = seasonSelect.value;
     state.year = yearSelect.value;
-    state.sort = sortSelect.value;
+    // state.sort / state.order are owned by the View select + header sort handlers.
     state.limit = Number.parseInt(limitSelect.value, 10) || DEFAULT_PAGE_SIZE;
 
     // Update mobile filter badge
@@ -443,11 +467,14 @@ async function renderCatalog(status: MirrorStatus) {
       search: state.search,
       format: state.format,
       sort: state.sort,
+      order: state.order,
       limit: state.limit,
       offset: state.offset,
     });
 
     syncCatalogStateToUrl(state);
+    updateSortHeaders(state);
+    updateActiveFilterChips(state);
 
     const totalPages = Math.max(1, Math.ceil(currentPayload.pagination.total / state.limit));
     const currentPage = currentPayload.pagination.total === 0 ? 0 : Math.floor(state.offset / state.limit) + 1;
@@ -523,13 +550,48 @@ async function renderCatalog(status: MirrorStatus) {
 
   const debouncedRender = debounce(resetAndRender, 120);
 
+  // When true, a programmatic View-select change is only syncing the label and must
+  // not overwrite the sort order chosen by a header toggle.
+  let syncingSortSelect = false;
+
+  // Apply a new sort field/order, syncing the View select, then re-render from page 1.
+  const applySort = (field: CatalogSort, order: CatalogSortOrder) => {
+    state.sort = field;
+    state.order = order;
+    if (sortSelect.value !== field) {
+      sortSelect.value = field;
+      // Keep the custom dropdown label in sync without recursively re-applying sort.
+      syncingSortSelect = true;
+      sortSelect.dispatchEvent(new Event("change"));
+      syncingSortSelect = false;
+    }
+    resetAndRender();
+  };
+
   searchInput.addEventListener("input", debouncedRender);
   formatSelect.addEventListener("change", resetAndRender);
   seasonSelect.addEventListener("change", resetAndRender);
   yearSelect.addEventListener("change", resetAndRender);
-  sortSelect.addEventListener("change", resetAndRender);
+  sortSelect.addEventListener("change", () => {
+    if (syncingSortSelect) {
+      return;
+    }
+    const nextSort = normalizeCatalogSort(sortSelect.value);
+    // Selecting a field from the View menu resets to that field's default order.
+    state.sort = nextSort;
+    state.order = defaultSortOrder(nextSort);
+    resetAndRender();
+  });
   limitSelect.addEventListener("change", resetAndRender);
   bindMediaQueryChange(compactLayoutMedia, scheduleRender);
+
+  wireSortableHeaders(applySort, () => state);
+  wireActiveFilterChips({
+    searchInput,
+    formatSelect,
+    seasonSelect,
+    yearSelect,
+  });
 
   if (resetButton) {
     resetButton.addEventListener("click", () => {
@@ -1286,13 +1348,17 @@ function readCatalogStateFromUrl(): CatalogState {
   const params = new URLSearchParams(window.location.search);
   const limit = clampLimit(params.get("limit"));
   const page = clampPage(params.get("page"));
+  const sort = normalizeCatalogSort(params.get("sort"));
+  // Old URLs carry only `sort`; the per-field default order keeps them behaving as before.
+  const order = normalizeCatalogSortOrder(params.get("order"), sort);
 
   return {
     search: params.get("q")?.trim() ?? "",
     format: params.get("format")?.trim().toUpperCase() ?? "",
     season: params.get("season")?.trim().toUpperCase() ?? "",
     year: params.get("year")?.trim() ?? "",
-    sort: normalizeSort(params.get("sort")),
+    sort,
+    order,
     limit,
     offset: (page - 1) * limit,
   };
@@ -1314,6 +1380,10 @@ function syncCatalogStateToUrl(state: CatalogState) {
   }
   if (state.sort !== "updated") {
     params.set("sort", state.sort);
+  }
+  // Only serialise order when it differs from the field default, keeping old URLs stable.
+  if (state.order !== defaultSortOrder(state.sort)) {
+    params.set("order", state.order);
   }
   if (state.limit !== DEFAULT_PAGE_SIZE) {
     params.set("limit", String(state.limit));
@@ -1365,6 +1435,200 @@ function filterSeasonAndYear(items: CatalogIndexItem[], seasonFilter: string, ye
     });
   }
   return result;
+}
+
+// --- Sortable table headers ------------------------------------------------
+
+function orderWord(order: CatalogSortOrder) {
+  return order === "asc" ? "ascending" : "descending";
+}
+
+// The order a click on this header will produce: toggles the active column, or
+// falls back to the field default when activating a new column.
+function nextHeaderOrder(field: CatalogSort, state: CatalogState): CatalogSortOrder {
+  if (state.sort === field) {
+    return state.order === "asc" ? "desc" : "asc";
+  }
+  return defaultSortOrder(field);
+}
+
+function renderSortableHeader(field: CatalogSort, label: string, state: CatalogState) {
+  const isActive = state.sort === field;
+  const ariaSort = isActive ? (state.order === "asc" ? "ascending" : "descending") : "none";
+  const arrow = isActive ? (state.order === "asc" ? "↑" : "↓") : "↕";
+  const actionOrder = nextHeaderOrder(field, state);
+  const ariaLabel = `Sort by ${label.toLowerCase()} ${orderWord(actionOrder)}`;
+
+  return `
+    <th class="catalog-th catalog-th--sortable" data-sort-col="${field}" aria-sort="${ariaSort}">
+      <button type="button" class="catalog-sort-btn${isActive ? " is-active" : ""}" data-sort-field="${field}" aria-label="${escapeHtml(ariaLabel)}">
+        <span class="catalog-sort-btn__label">${escapeHtml(label)}</span>
+        <span class="catalog-sort-btn__arrow" aria-hidden="true">${arrow}</span>
+      </button>
+    </th>
+  `;
+}
+
+function updateSortHeaders(state: CatalogState) {
+  for (const column of SORTABLE_COLUMNS) {
+    const th = document.querySelector<HTMLTableCellElement>(`.catalog-th[data-sort-col="${column.field}"]`);
+    const button = document.querySelector<HTMLButtonElement>(`.catalog-sort-btn[data-sort-field="${column.field}"]`);
+    if (!th || !button) {
+      continue;
+    }
+
+    const isActive = state.sort === column.field;
+    const ariaSort = isActive ? (state.order === "asc" ? "ascending" : "descending") : "none";
+    const arrow = isActive ? (state.order === "asc" ? "↑" : "↓") : "↕";
+    const actionOrder = nextHeaderOrder(column.field, state);
+
+    th.setAttribute("aria-sort", ariaSort);
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-label", `Sort by ${column.label.toLowerCase()} ${orderWord(actionOrder)}`);
+
+    const arrowEl = button.querySelector<HTMLElement>(".catalog-sort-btn__arrow");
+    if (arrowEl) {
+      arrowEl.textContent = arrow;
+    }
+  }
+}
+
+function wireSortableHeaders(
+  applySort: (field: CatalogSort, order: CatalogSortOrder) => void,
+  getState: () => CatalogState,
+) {
+  document.querySelectorAll<HTMLButtonElement>(".catalog-table thead [data-sort-field]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = normalizeCatalogSort(button.dataset.sortField);
+      applySort(field, nextHeaderOrder(field, getState()));
+    });
+  });
+}
+
+// --- Active filter chips ----------------------------------------------------
+
+type CatalogFilterControls = {
+  searchInput: HTMLInputElement;
+  formatSelect: HTMLSelectElement;
+  seasonSelect: HTMLSelectElement;
+  yearSelect: HTMLSelectElement;
+};
+
+// Read the visible label from the native select so chips mirror the custom-select text.
+function readSelectLabel(select: HTMLSelectElement, fallback: string) {
+  const option = select.selectedOptions[0];
+  const text = option?.text?.trim();
+  return text || fallback;
+}
+
+function renderFilterChip(kind: string, prefix: string, value: string, removeLabel: string) {
+  return `
+    <span class="catalog-chip" data-chip="${escapeHtml(kind)}">
+      <span class="catalog-chip__text"><span class="catalog-chip__prefix">${escapeHtml(prefix)}:</span> ${escapeHtml(value)}</span>
+      <button type="button" class="catalog-chip__remove" data-chip-remove="${escapeHtml(kind)}" aria-label="${escapeHtml(removeLabel)}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </span>
+  `;
+}
+
+function updateActiveFilterChips(state: CatalogState) {
+  const container = document.getElementById("catalog-active-filters");
+  if (!container) {
+    return;
+  }
+
+  const formatSelect = document.getElementById("catalog-format") as HTMLSelectElement | null;
+  const seasonSelect = document.getElementById("catalog-season") as HTMLSelectElement | null;
+  const yearSelect = document.getElementById("catalog-year") as HTMLSelectElement | null;
+
+  const chips: string[] = [];
+
+  if (state.search) {
+    chips.push(renderFilterChip("search", "Search", state.search, `Remove search filter: ${state.search}`));
+  }
+  if (state.format) {
+    const label = formatSelect ? readSelectLabel(formatSelect, state.format) : state.format;
+    chips.push(renderFilterChip("format", "Format", label, `Remove format filter: ${label}`));
+  }
+  if (state.season) {
+    const label = seasonSelect ? readSelectLabel(seasonSelect, state.season) : state.season;
+    chips.push(renderFilterChip("season", "Season", label, `Remove season filter: ${label}`));
+  }
+  if (state.year) {
+    const label = yearSelect ? readSelectLabel(yearSelect, state.year) : state.year;
+    chips.push(renderFilterChip("year", "Year", label, `Remove year filter: ${label}`));
+  }
+
+  if (chips.length === 0) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = `
+    <span class="catalog-active-filters__label">Active filters</span>
+    <div class="catalog-active-filters__chips">${chips.join("")}</div>
+    <button type="button" class="catalog-active-filters__clear" data-chip-clear-all>Clear all</button>
+  `;
+}
+
+function wireActiveFilterChips(controls: CatalogFilterControls) {
+  const container = document.getElementById("catalog-active-filters");
+  if (!container) {
+    return;
+  }
+
+  const clearSearch = () => {
+    if (controls.searchInput.value) {
+      controls.searchInput.value = "";
+      controls.searchInput.dispatchEvent(new Event("input"));
+    }
+  };
+
+  const clearSelect = (select: HTMLSelectElement) => {
+    if (select.value) {
+      select.value = "";
+      // Fires the change handler (re-render) and the custom-select label resync.
+      select.dispatchEvent(new Event("change"));
+    }
+  };
+
+  container.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+
+    if (target.closest("[data-chip-clear-all]")) {
+      clearSearch();
+      clearSelect(controls.formatSelect);
+      clearSelect(controls.seasonSelect);
+      clearSelect(controls.yearSelect);
+      return;
+    }
+
+    const removeButton = target.closest<HTMLButtonElement>("[data-chip-remove]");
+    if (!removeButton) {
+      return;
+    }
+
+    switch (removeButton.dataset.chipRemove) {
+      case "search":
+        clearSearch();
+        break;
+      case "format":
+        clearSelect(controls.formatSelect);
+        break;
+      case "season":
+        clearSelect(controls.seasonSelect);
+        break;
+      case "year":
+        clearSelect(controls.yearSelect);
+        break;
+    }
+  });
 }
 
 async function getCatalog() {
@@ -1489,17 +1753,6 @@ function clampLimit(value: string | null) {
 function clampPage(value: string | null) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function normalizeSort(value: string | null) {
-  switch (value) {
-    case "title":
-    case "year":
-    case "score":
-      return value;
-    default:
-      return "updated";
-  }
 }
 
 function setDocumentMeta(title: string) {

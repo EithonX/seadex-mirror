@@ -71,6 +71,7 @@ export type CatalogPayload = {
     search: string;
     format: string | null;
     sort: CatalogSort;
+    order: CatalogSortOrder;
     limit: number;
     offset: number;
   };
@@ -285,7 +286,9 @@ export type EntryPayload = {
   }>;
 };
 
-export type CatalogSort = "updated" | "title" | "year" | "score";
+export type CatalogSort = "updated" | "title" | "format" | "year" | "episodes" | "score";
+
+export type CatalogSortOrder = "asc" | "desc";
 
 export function filterCatalogItems(
   items: CatalogIndexItem[],
@@ -293,13 +296,15 @@ export function filterCatalogItems(
     search?: string | null;
     format?: string | null;
     sort?: string | null;
+    order?: string | null;
     limit?: number | null;
     offset?: number | null;
   },
 ): CatalogPayload {
   const search = (input.search ?? "").trim();
   const format = normalizeFormat(input.format ?? "");
-  const sort = normalizeSort(input.sort ?? "updated");
+  const sort = normalizeCatalogSort(input.sort ?? "updated");
+  const order = normalizeCatalogSortOrder(input.order, sort);
   const limit = clampInt(input.limit, 24, 1, 100);
   const offset = clampInt(input.offset, 0, 0, 5000);
   const lowerSearch = search.toLowerCase();
@@ -313,7 +318,7 @@ export function filterCatalogItems(
     filtered = filtered.filter((item) => (item.format ?? "").toUpperCase() === format);
   }
 
-  const sorted = [...filtered].sort((left, right) => compareCatalogItems(left, right, sort));
+  const sorted = [...filtered].sort((left, right) => compareCatalogItems(left, right, sort, order));
   const sliced = sorted.slice(offset, offset + limit);
   const pageItems = sliced.map(stripSearchText);
   const nextOffset = offset + limit < sorted.length ? offset + limit : null;
@@ -323,6 +328,7 @@ export function filterCatalogItems(
       search,
       format,
       sort,
+      order,
       limit,
       offset,
     },
@@ -365,10 +371,12 @@ function normalizeFormat(value: string): string | null {
   return normalized || null;
 }
 
-function normalizeSort(value: string): CatalogSort {
+export function normalizeCatalogSort(value: string | null | undefined): CatalogSort {
   switch (value) {
     case "title":
+    case "format":
     case "year":
+    case "episodes":
     case "score":
       return value;
     default:
@@ -376,39 +384,87 @@ function normalizeSort(value: string): CatalogSort {
   }
 }
 
-function compareCatalogItems(left: CatalogIndexItem, right: CatalogIndexItem, sort: CatalogSort): number {
+export function defaultSortOrder(sort: CatalogSort): CatalogSortOrder {
   switch (sort) {
     case "title":
-      return (
-        compareStrings(catalogTitle(left), catalogTitle(right)) ||
-        compareNumbers(left.alId, right.alId)
-      );
-    case "year":
-      return (
-        compareNumbers(catalogYear(right), catalogYear(left)) ||
-        compareNumbers(Date.parse(right.sourceUpdatedAt), Date.parse(left.sourceUpdatedAt)) ||
-        compareNumbers(right.alId, left.alId)
-      );
-    case "score":
-      return (
-        compareNumbers(right.averageScore ?? 0, left.averageScore ?? 0) ||
-        compareNumbers(Date.parse(right.sourceUpdatedAt), Date.parse(left.sourceUpdatedAt)) ||
-        compareNumbers(right.alId, left.alId)
-      );
+    case "format":
+      return "asc";
     default:
-      return (
-        compareNumbers(Date.parse(right.sourceUpdatedAt), Date.parse(left.sourceUpdatedAt)) ||
-        compareNumbers(right.alId, left.alId)
-      );
+      // updated, year, episodes, score
+      return "desc";
   }
+}
+
+export function normalizeCatalogSortOrder(
+  value: string | null | undefined,
+  sort: CatalogSort,
+): CatalogSortOrder {
+  if (value === "asc" || value === "desc") {
+    return value;
+  }
+  return defaultSortOrder(sort);
+}
+
+function compareCatalogItems(
+  left: CatalogIndexItem,
+  right: CatalogIndexItem,
+  sort: CatalogSort,
+  order: CatalogSortOrder,
+): number {
+  const direction = order === "asc" ? 1 : -1;
+
+  switch (sort) {
+    case "title": {
+      const primary = compareStrings(catalogTitle(left), catalogTitle(right));
+      // Stable tie-breaker: alId ascending.
+      return direction * primary || compareNumbers(left.alId, right.alId);
+    }
+    case "format": {
+      const primary = compareStrings(catalogFormat(left), catalogFormat(right));
+      return direction * primary || compareUpdatedThenAlIdDesc(left, right);
+    }
+    case "year": {
+      const primary = compareNumbers(catalogYear(left), catalogYear(right));
+      return direction * primary || compareUpdatedThenAlIdDesc(left, right);
+    }
+    case "episodes": {
+      const primary = compareNumbers(catalogEpisodes(left), catalogEpisodes(right));
+      return direction * primary || compareUpdatedThenAlIdDesc(left, right);
+    }
+    case "score": {
+      const primary = compareNumbers(left.averageScore ?? 0, right.averageScore ?? 0);
+      return direction * primary || compareUpdatedThenAlIdDesc(left, right);
+    }
+    default: {
+      const primary = compareNumbers(Date.parse(left.sourceUpdatedAt), Date.parse(right.sourceUpdatedAt));
+      // Stable tie-breaker: alId descending.
+      return direction * primary || compareNumbers(right.alId, left.alId);
+    }
+  }
+}
+
+// Shared tie-breaker for non-updated / non-title sorts: newest update first, then newest alId.
+function compareUpdatedThenAlIdDesc(left: CatalogIndexItem, right: CatalogIndexItem): number {
+  return (
+    compareNumbers(Date.parse(right.sourceUpdatedAt), Date.parse(left.sourceUpdatedAt)) ||
+    compareNumbers(right.alId, left.alId)
+  );
 }
 
 function catalogTitle(item: CatalogItem): string {
   return (item.titles.english ?? item.titles.userPreferred ?? String(item.alId)).toLowerCase();
 }
 
+function catalogFormat(item: CatalogItem): string {
+  return (item.format ?? "").toUpperCase();
+}
+
 function catalogYear(item: CatalogItem): number {
   return item.startYear ?? item.seasonYear ?? 0;
+}
+
+function catalogEpisodes(item: CatalogItem): number {
+  return item.episodes ?? 0;
 }
 
 function compareNumbers(left: number, right: number): number {

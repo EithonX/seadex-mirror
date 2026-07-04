@@ -808,6 +808,146 @@ img {
   white-space: nowrap;
 }
 
+/* Keep padding on the th so the header row height matches non-sortable columns. */
+.catalog-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: -0.85rem -1.25rem;
+  padding: 0.85rem 1.25rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.16s ease;
+}
+
+.catalog-sort-btn:hover,
+.catalog-sort-btn.is-active {
+  color: var(--text);
+}
+
+.catalog-sort-btn:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: -2px;
+}
+
+.catalog-sort-btn__arrow {
+  font-size: 0.68rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.16s ease, color 0.16s ease;
+}
+
+.catalog-sort-btn:hover .catalog-sort-btn__arrow {
+  opacity: 0.5;
+}
+
+.catalog-sort-btn.is-active .catalog-sort-btn__arrow {
+  opacity: 1;
+  color: var(--accent-hover);
+}
+
+/* Active filter chips */
+.catalog-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.catalog-active-filters[hidden] {
+  display: none;
+}
+
+.catalog-active-filters__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.catalog-active-filters__chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.catalog-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.35rem 0.28rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+  background: var(--panel);
+  font-size: 0.78rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.catalog-chip__prefix {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.catalog-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.catalog-chip__remove:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.catalog-chip__remove:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 1px;
+}
+
+.catalog-active-filters__clear {
+  padding: 0.28rem 0.65rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+.catalog-active-filters__clear:hover {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+}
+
+.catalog-active-filters__clear:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 1px;
+}
+
 .catalog-table td {
   padding: 1rem 1.25rem;
   vertical-align: middle;
