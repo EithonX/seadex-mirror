@@ -876,6 +876,10 @@ img {
   color: var(--muted);
 }
 
+.catalog-active-filters__summary {
+  display: none;
+}
+
 .catalog-active-filters__chips {
   display: flex;
   align-items: center;
@@ -894,6 +898,11 @@ img {
   font-size: 0.78rem;
   color: var(--text);
   white-space: nowrap;
+}
+
+.catalog-chip[data-chip="view"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
 }
 
 .catalog-chip__prefix {
@@ -946,6 +955,10 @@ img {
 .catalog-active-filters__clear:focus-visible {
   outline: 2px solid var(--accent-hover);
   outline-offset: 1px;
+}
+
+.catalog-active-filters__clear-mobile {
+  display: none;
 }
 
 .catalog-table td {
@@ -4468,102 +4481,53 @@ img {
     min-width: 0;
   }
 
-  .catalog-reset-button {
-    grid-column: span 6 !important;
-    width: 100% !important;
-    max-width: none !important;
-    justify-content: center !important;
-    margin-top: 0.75rem !important;
-    order: 10 !important; /* Force it to the bottom of the collapsible filters grid */
-    padding: 0.75rem 0 0.25rem !important;
-    border: none !important;
-    border-top: 1px solid var(--line) !important;
-    background: transparent !important;
-    border-radius: 0 !important;
-    max-height: 48px !important;
-    box-shadow: none !important;
-    transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, border-color 0.2s ease, background-color 0.2s ease !important;
+  .catalog-active-filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+    margin: -0.15rem 0 0.65rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    overflow: hidden;
   }
-  .catalog-reset-button:hover:not(:disabled) {
-    background: transparent !important;
-    color: var(--accent) !important;
+
+  .catalog-active-filters__label {
+    display: none;
   }
-  .catalog-reset-button:disabled {
-    max-height: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    border-top: none !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
+
+  .catalog-active-filters__summary {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 650;
   }
-}
 
-/* Premium Filter Reset Button styling */
-.catalog-reset-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  background: transparent;
-  border: none;
-  padding: 0.4rem 0.65rem;
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  user-select: none;
-  
-  /* Collapsed state by default for smooth slide out */
-  max-width: 0;
-  padding-left: 0;
-  padding-right: 0;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  overflow: hidden;
-  white-space: nowrap;
-  
-  transition: max-width 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, color 0.2s ease, background-color 0.2s ease, visibility 0.3s;
-}
+  .catalog-active-filters__chips {
+    display: none;
+  }
 
-.catalog-reset-button:not(:disabled) {
-  max-width: 150px; /* Expands to full width dynamically */
-  padding: 0.4rem 0.65rem;
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-}
+  .catalog-active-filters__clear {
+    flex: 0 0 auto;
+    padding: 0.2rem 0.45rem;
+    white-space: nowrap;
+  }
 
-.catalog-reset-button svg {
-  width: 0.85rem;
-  height: 0.85rem;
-  color: var(--muted);
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease;
-}
+  .catalog-active-filters__clear-desktop {
+    display: none;
+  }
 
-.catalog-reset-button:hover:not(:disabled) {
-  color: var(--accent);
-  background-color: var(--accent-soft);
-}
-
-.catalog-reset-button:hover:not(:disabled) svg {
-  color: var(--accent);
-  transform: rotate(90deg);
-}
-
-.catalog-reset-button:active:not(:disabled) {
-  transform: scale(0.96);
-}
-
-.catalog-reset-button:disabled {
-  max-width: 0;
-  padding-left: 0;
-  padding-right: 0;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
+  .catalog-active-filters__clear-mobile {
+    display: inline;
+  }
 }
 
 /* Notification Badge for active filters */

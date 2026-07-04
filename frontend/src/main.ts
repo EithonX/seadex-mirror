@@ -84,6 +84,15 @@ const SORTABLE_COLUMNS: SortableColumn[] = [
   { field: "updated", label: "Updated" },
 ];
 
+const CATALOG_SORT_LABELS: Record<CatalogSort, string> = {
+  updated: "Latest updates",
+  title: "Alphabetical",
+  format: "Format",
+  year: "Year",
+  episodes: "Episodes",
+  score: "Score",
+};
+
 type SheetWorkbookState = {
   tab: string;
   query: string;
@@ -327,10 +336,6 @@ async function renderCatalog(status: MirrorStatus) {
                         .join("")}
                     </select>
                   </label>
-                  <button id="catalog-reset" class="catalog-reset-button" type="button" title="Clear active filters" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    <span>Clear filters</span>
-                  </button>
                 </div>
                 <div class="catalog-toolbar__group">
                   <label class="control-select">
@@ -423,7 +428,6 @@ async function renderCatalog(status: MirrorStatus) {
   const nextButton = query<HTMLButtonElement>("#catalog-next");
   const lastButton = query<HTMLButtonElement>("#catalog-last");
   const compactLayoutMedia = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
-  const resetButton = document.getElementById("catalog-reset") as HTMLButtonElement | null;
 
   let currentPayload: CatalogPayload | null = null;
   const prefetchObserver = createCatalogPrefetchObserver();
@@ -446,7 +450,8 @@ async function renderCatalog(status: MirrorStatus) {
     state.limit = Number.parseInt(limitSelect.value, 10) || DEFAULT_PAGE_SIZE;
 
     // Update mobile filter badge
-    const activeCount = (state.format ? 1 : 0) + (state.season ? 1 : 0) + (state.year ? 1 : 0);
+    const activeCount =
+      (state.search ? 1 : 0) + (state.format ? 1 : 0) + (state.season ? 1 : 0) + (state.year ? 1 : 0);
     const badge = document.getElementById("mobile-filter-badge");
     if (badge) {
       if (activeCount > 0) {
@@ -455,11 +460,6 @@ async function renderCatalog(status: MirrorStatus) {
       } else {
         badge.hidden = true;
       }
-    }
-
-    // Update Reset button state
-    if (resetButton) {
-      resetButton.disabled = activeCount === 0;
     }
 
     const filteredItems = filterSeasonAndYear(catalog.items, state.season, state.year);
@@ -535,11 +535,12 @@ async function renderCatalog(status: MirrorStatus) {
       formatSelect.value = "";
       seasonSelect.value = "";
       yearSelect.value = "";
-      // Dispatch change so the custom-select triggers resync their labels;
-      // each change handler also calls resetAndRender to re-render the page.
+      // Dispatch events so URL state, chips, results, and custom-select labels resync.
+      searchInput.dispatchEvent(new Event("input"));
       formatSelect.dispatchEvent(new Event("change"));
       seasonSelect.dispatchEvent(new Event("change"));
       yearSelect.dispatchEvent(new Event("change"));
+      applySort("updated", "desc");
     });
   }
 
@@ -591,18 +592,8 @@ async function renderCatalog(status: MirrorStatus) {
     formatSelect,
     seasonSelect,
     yearSelect,
+    resetSort: () => applySort("updated", "desc"),
   });
-
-  if (resetButton) {
-    resetButton.addEventListener("click", () => {
-      formatSelect.value = "";
-      seasonSelect.value = "";
-      yearSelect.value = "";
-      formatSelect.dispatchEvent(new Event("change"));
-      seasonSelect.dispatchEvent(new Event("change"));
-      yearSelect.dispatchEvent(new Event("change"));
-    });
-  }
 
   firstButton.addEventListener("click", () => {
     state.offset = 0;
@@ -1512,6 +1503,7 @@ type CatalogFilterControls = {
   formatSelect: HTMLSelectElement;
   seasonSelect: HTMLSelectElement;
   yearSelect: HTMLSelectElement;
+  resetSort: () => void;
 };
 
 // Read the visible label from the native select so chips mirror the custom-select text.
@@ -1530,6 +1522,31 @@ function renderFilterChip(kind: string, prefix: string, value: string, removeLab
       </button>
     </span>
   `;
+}
+
+function catalogSortChipLabel(state: CatalogState) {
+  const label = CATALOG_SORT_LABELS[state.sort] ?? state.sort;
+  const arrow = state.order === "asc" ? "↑" : "↓";
+  return `${label} ${arrow}`;
+}
+
+function catalogActiveSummary(state: CatalogState) {
+  const filterCount =
+    (state.search ? 1 : 0) + (state.format ? 1 : 0) + (state.season ? 1 : 0) + (state.year ? 1 : 0);
+  const hasOnlySearchFilter = filterCount === 1 && Boolean(state.search);
+  const hasViewState = state.sort !== "updated" || state.order !== "desc";
+  const summary: string[] = [];
+
+  if (hasOnlySearchFilter) {
+    summary.push("Search active");
+  } else if (filterCount > 0) {
+    summary.push(`${filterCount} ${filterCount === 1 ? "filter" : "filters"} active`);
+  }
+  if (hasViewState) {
+    summary.push(`View: ${catalogSortChipLabel(state)}`);
+  }
+
+  return summary.join(" · ");
 }
 
 function updateActiveFilterChips(state: CatalogState) {
@@ -1559,6 +1576,10 @@ function updateActiveFilterChips(state: CatalogState) {
     const label = yearSelect ? readSelectLabel(yearSelect, state.year) : state.year;
     chips.push(renderFilterChip("year", "Year", label, `Remove year filter: ${label}`));
   }
+  if (state.sort !== "updated" || state.order !== "desc") {
+    const label = catalogSortChipLabel(state);
+    chips.push(renderFilterChip("view", "View", label, "Reset view to latest updates descending"));
+  }
 
   if (chips.length === 0) {
     container.hidden = true;
@@ -1568,9 +1589,13 @@ function updateActiveFilterChips(state: CatalogState) {
 
   container.hidden = false;
   container.innerHTML = `
-    <span class="catalog-active-filters__label">Active filters</span>
+    <span class="catalog-active-filters__label">Active</span>
+    <span class="catalog-active-filters__summary">${escapeHtml(catalogActiveSummary(state))}</span>
     <div class="catalog-active-filters__chips">${chips.join("")}</div>
-    <button type="button" class="catalog-active-filters__clear" data-chip-clear-all>Clear all</button>
+    <button type="button" class="catalog-active-filters__clear" data-chip-clear-all aria-label="Clear all active filters and view state">
+      <span class="catalog-active-filters__clear-desktop">Clear all</span>
+      <span class="catalog-active-filters__clear-mobile" aria-hidden="true">Clear</span>
+    </button>
   `;
 }
 
@@ -1606,6 +1631,7 @@ function wireActiveFilterChips(controls: CatalogFilterControls) {
       clearSelect(controls.formatSelect);
       clearSelect(controls.seasonSelect);
       clearSelect(controls.yearSelect);
+      controls.resetSort();
       return;
     }
 
@@ -1626,6 +1652,9 @@ function wireActiveFilterChips(controls: CatalogFilterControls) {
         break;
       case "year":
         clearSelect(controls.yearSelect);
+        break;
+      case "view":
+        controls.resetSort();
         break;
     }
   });
