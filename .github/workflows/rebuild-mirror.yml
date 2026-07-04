@@ -65,6 +65,10 @@ jobs:
         if: steps.mirror.outputs.skipped != 'true'
         run: npm run build:frontend
 
+      - name: Verify frontend build
+        if: steps.mirror.outputs.skipped != 'true'
+        run: npm run verify:frontend-build
+
       - name: Verify Cloudflare Pages access
         if: steps.mirror.outputs.skipped != 'true'
         run: node scripts/verify-cloudflare.mjs

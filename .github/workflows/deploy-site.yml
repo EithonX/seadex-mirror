@@ -52,6 +52,9 @@ jobs:
       - name: Build frontend
         run: npm run build:frontend
 
+      - name: Verify frontend build
+        run: npm run verify:frontend-build
+
       - name: Verify Cloudflare Pages access
         run: node scripts/verify-cloudflare.mjs
 

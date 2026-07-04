@@ -11,5 +11,15 @@ export default defineConfig({
   build: {
     outDir: resolve("dist"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replaceAll("\\", "/");
+          if (normalizedId.endsWith("/frontend/src/sheet-workbook.ts")) {
+            return "sheet-workbook";
+          }
+        },
+      },
+    },
   },
 });
