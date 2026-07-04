@@ -1,10 +1,12 @@
 import "./styles.css";
-import { renderPageFrame, renderSearchDialog } from "./app-shell";
+import { renderPageFrame, renderSearchDialog, renderSheetSkeleton } from "./app-shell";
 import {
   buildSeasonOptions,
   buildYearOptions,
+  renderCatalogEmptyState,
   renderCatalogMobileCard,
   renderCatalogRow,
+  renderCatalogSkeleton,
   renderFormatOptions,
 } from "./catalog-page";
 import {
@@ -185,6 +187,36 @@ function getEntryDataUrl(alId: number) {
   return `${DATA_ROOT}/entries/${alId}.json`;
 }
 
+// Conservatively prefetch entry payloads for catalog rows/cards as they approach
+// the viewport. Returns null when IntersectionObserver is unavailable so callers
+// can fall back to the existing hover/focus prefetch behaviour.
+function createCatalogPrefetchObserver(): IntersectionObserver | null {
+  if (typeof IntersectionObserver === "undefined") {
+    return null;
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) {
+          continue;
+        }
+
+        const alId = Number((entry.target as HTMLElement).dataset.entryId);
+        if (Number.isFinite(alId)) {
+          prefetchEntryPayload(alId);
+        }
+
+        // Only prefetch once per element.
+        observer.unobserve(entry.target);
+      }
+    },
+    { rootMargin: "400px 0px" },
+  );
+
+  return observer;
+}
+
 function parseRoute(pathname: string): RouteContext {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/") {
@@ -208,6 +240,17 @@ function parseRoute(pathname: string): RouteContext {
 }
 
 async function renderCatalog(status: MirrorStatus) {
+  appRoot.innerHTML = renderPageFrame(
+    "index",
+    `
+      <main class="page page--catalog">
+        ${renderCatalogSkeleton()}
+      </main>
+      ${renderSearchDialog()}
+    `,
+  );
+  wireCommonUi(status, "index");
+
   const catalog = await getCatalog();
   const state = readCatalogStateFromUrl();
   const seasonOptions = buildSeasonOptions(catalog.items);
@@ -359,6 +402,16 @@ async function renderCatalog(status: MirrorStatus) {
   const resetButton = document.getElementById("catalog-reset") as HTMLButtonElement | null;
 
   let currentPayload: CatalogPayload | null = null;
+  const prefetchObserver = createCatalogPrefetchObserver();
+
+  const observeVisibleEntries = (container: HTMLElement) => {
+    if (!prefetchObserver) {
+      return;
+    }
+    container.querySelectorAll<HTMLElement>("[data-entry-id]").forEach((element) => {
+      prefetchObserver.observe(element);
+    });
+  };
 
   const renderPage = () => {
     state.search = searchInput.value.trim();
@@ -400,22 +453,24 @@ async function renderCatalog(status: MirrorStatus) {
     const currentPage = currentPayload.pagination.total === 0 ? 0 : Math.floor(state.offset / state.limit) + 1;
     const useMobileLayout = compactLayoutMedia.matches;
 
+    // Stop observing rows/cards from the previous render; they are about to be replaced.
+    prefetchObserver?.disconnect();
+
     if (currentPayload.items.length === 0) {
+      const hasActiveFilters = Boolean(state.search || state.format || state.season || state.year);
+      const emptyStateHtml = renderCatalogEmptyState(hasActiveFilters);
       if (useMobileLayout) {
         body.innerHTML = "";
-        mobileList.innerHTML = `
-          <div class="catalog-empty catalog-empty--mobile">
-            No mirrored entries matched that filter.
-          </div>
-        `;
+        mobileList.innerHTML = `<div class="catalog-empty catalog-empty--mobile">${emptyStateHtml}</div>`;
       } else {
         body.innerHTML = `
           <tr>
-            <td class="catalog-empty" colspan="8">No mirrored entries matched that filter.</td>
+            <td class="catalog-empty" colspan="8">${emptyStateHtml}</td>
           </tr>
         `;
         mobileList.innerHTML = "";
       }
+      wireCatalogEmptyClear();
       summary.textContent = "0 row(s) loaded.";
       indicator.textContent = "Page 0 of 0";
       firstButton.disabled = true;
@@ -441,9 +496,25 @@ async function renderCatalog(status: MirrorStatus) {
     lastButton.disabled = currentPage >= totalPages;
 
     wireCatalogActions(body, mobileList);
+    observeVisibleEntries(useMobileLayout ? mobileList : body);
   };
 
   const scheduleRender = createRenderScheduler(renderPage);
+
+  function wireCatalogEmptyClear() {
+    const clearButton = document.querySelector<HTMLButtonElement>("[data-empty-clear]");
+    clearButton?.addEventListener("click", () => {
+      searchInput.value = "";
+      formatSelect.value = "";
+      seasonSelect.value = "";
+      yearSelect.value = "";
+      // Dispatch change so the custom-select triggers resync their labels;
+      // each change handler also calls resetAndRender to re-render the page.
+      formatSelect.dispatchEvent(new Event("change"));
+      seasonSelect.dispatchEvent(new Event("change"));
+      yearSelect.dispatchEvent(new Event("change"));
+    });
+  }
 
   const resetAndRender = () => {
     state.offset = 0;
@@ -503,6 +574,16 @@ async function renderCatalog(status: MirrorStatus) {
 
 async function renderSheet(status: MirrorStatus) {
   document.body.classList.add("is-sheet-page");
+
+  appRoot.innerHTML = renderPageFrame(
+    "sheet",
+    `
+      ${renderSheetSkeleton()}
+      ${renderSearchDialog()}
+    `,
+  );
+  wireCommonUi(status, "sheet");
+
   const sheetRendererPromise = loadSheetRenderer();
   const workbookPromise = loadSheetWorkbookPayload();
   const [sheetRenderer, workbook] = await Promise.all([sheetRendererPromise, workbookPromise]);

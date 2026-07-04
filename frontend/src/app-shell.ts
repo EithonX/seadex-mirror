@@ -43,6 +43,42 @@ function renderShell(context: PageContext) {
   `;
 }
 
+export function renderSheetSkeleton() {
+  const tabs = Array.from({ length: 5 })
+    .map(() => `<div class="skeleton-block sheet-skeleton__tab"></div>`)
+    .join("");
+
+  const rows = Array.from({ length: 10 })
+    .map(
+      () => `
+        <div class="sheet-skeleton__row" aria-hidden="true">
+          <div class="skeleton-block sheet-skeleton__cell sheet-skeleton__cell--wide"></div>
+          <div class="skeleton-block sheet-skeleton__cell"></div>
+          <div class="skeleton-block sheet-skeleton__cell"></div>
+          <div class="skeleton-block sheet-skeleton__cell sheet-skeleton__cell--short"></div>
+        </div>
+      `,
+    )
+    .join("");
+
+  return `
+    <main class="page page--sheet">
+      <section class="sheet-workbook sheet-skeleton" aria-busy="true">
+        <span class="skeleton-sr">Loading sheet workbook...</span>
+        <div class="sheet-workbook__panel sheet-workbook__masthead sheet-skeleton__masthead" aria-hidden="true">
+          <div class="skeleton-block sheet-skeleton__title"></div>
+          <div class="skeleton-block sheet-skeleton__masthead-action"></div>
+        </div>
+        <div class="sheet-workbook__panel sheet-workbook__toolbar sheet-skeleton__toolbar" aria-hidden="true">
+          <div class="sheet-skeleton__tabs">${tabs}</div>
+          <div class="skeleton-block sheet-skeleton__search"></div>
+        </div>
+        <section class="sheet-workbook__grid sheet-skeleton__grid" aria-hidden="true">${rows}</section>
+      </section>
+    </main>
+  `;
+}
+
 export function renderSearchDialog() {
   return `
     <div id="search-dialog" class="search-dialog" hidden aria-hidden="true">

@@ -3,6 +3,89 @@ import { capitalize, formatCatalogFormat, formatDate } from "./format";
 import { escapeHtml } from "./html";
 import { renderDotsIcon } from "./icons";
 
+export function renderCatalogSkeleton(): string {
+  const desktopRows = Array.from({ length: 8 })
+    .map(
+      () => `
+        <div class="catalog-skeleton__row" aria-hidden="true">
+          <div class="catalog-skeleton__cell catalog-skeleton__cell--title">
+            <div class="skeleton-block catalog-skeleton__poster"></div>
+            <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--title"></div>
+          </div>
+          <div class="skeleton-block catalog-skeleton__line"></div>
+          <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--short"></div>
+          <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--short"></div>
+          <div class="skeleton-block catalog-skeleton__line"></div>
+          <div class="skeleton-block catalog-skeleton__line"></div>
+          <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--short"></div>
+        </div>
+      `,
+    )
+    .join("");
+
+  const mobileCards = Array.from({ length: 6 })
+    .map(
+      () => `
+        <div class="catalog-skeleton__card" aria-hidden="true">
+          <div class="skeleton-block catalog-skeleton__card-poster"></div>
+          <div class="catalog-skeleton__card-body">
+            <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--title"></div>
+            <div class="skeleton-block catalog-skeleton__line catalog-skeleton__line--short"></div>
+            <div class="skeleton-block catalog-skeleton__line"></div>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+
+  return `
+    <section class="catalog-page catalog-page--skeleton" aria-busy="true">
+      <span class="skeleton-sr">Loading mirrored catalog...</span>
+      <div class="catalog-toolbar catalog-skeleton__toolbar" aria-hidden="true">
+        <div class="skeleton-block catalog-skeleton__toolbar-search"></div>
+        <div class="catalog-skeleton__toolbar-filters">
+          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+        </div>
+      </div>
+
+      <section class="catalog-table-shell">
+        <div class="catalog-table-shell__scroll">
+          <div class="catalog-skeleton__rows">${desktopRows}</div>
+        </div>
+        <div class="catalog-mobile catalog-skeleton__mobile">${mobileCards}</div>
+      </section>
+
+      <div class="catalog-footer catalog-skeleton__footer" aria-hidden="true">
+        <div class="skeleton-block catalog-skeleton__footer-summary"></div>
+        <div class="skeleton-block catalog-skeleton__footer-controls"></div>
+      </div>
+    </section>
+  `;
+}
+
+export function renderCatalogEmptyState(hasActiveFilters: boolean): string {
+  const suggestion = hasActiveFilters
+    ? "Try a different title, or loosen the format, season, and year filters."
+    : "There are no mirrored entries to show right now. Check back after the next snapshot.";
+
+  return `
+    <div class="catalog-empty__panel" role="status">
+      <div class="catalog-empty__icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </div>
+      <h3 class="catalog-empty__title">No matching entries</h3>
+      <p class="catalog-empty__text">${suggestion}</p>
+      ${
+        hasActiveFilters
+          ? `<button class="catalog-empty__clear" type="button" data-empty-clear>Clear filters &amp; search</button>`
+          : ""
+      }
+    </div>
+  `;
+}
+
 export function renderFormatOptions(activeFormat: string) {
   return [
     ["TV", "TV Series"],
