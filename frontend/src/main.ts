@@ -8,13 +8,8 @@ import {
   type EntryPayload,
   type MirrorStatus,
   type SheetWorkbookPayload,
+  type SheetWorkbookSheet,
 } from "../../shared/mirror";
-import {
-  formatSheetWorkbookStats,
-  renderSheetWorkbookGrid,
-  renderSheetWorkbookStyleRules,
-  resolveSheetWorkbookSheet,
-} from "./sheet-workbook";
 
 const DATA_ROOT = "/mirror-data";
 const COMPACT_LAYOUT_MEDIA_QUERY = "(max-width: 760px)";
@@ -96,6 +91,7 @@ const appRoot = app;
 
 let cachedCatalogPromise: Promise<CatalogIndexPayload> | null = null;
 let cachedSheetWorkbookPromise: Promise<SheetWorkbookPayload> | null = null;
+let cachedSheetRendererPromise: Promise<typeof import("./sheet-workbook")> | null = null;
 const groupSummaryCache = new Map<number, CatalogGroupSummary>();
 const groupSummaryInflight = new Map<number, Promise<void>>();
 let globalKeydownCleanup: (() => void) | null = null;
@@ -493,9 +489,11 @@ async function renderCatalog(status: MirrorStatus) {
 
 async function renderSheet(status: MirrorStatus) {
   document.body.classList.add("is-sheet-page");
-  const workbook = await loadSheetWorkbookPayload();
-  const state = readSheetWorkbookStateFromUrl(workbook);
-  let activeSheet = resolveSheetWorkbookSheet(workbook, state.tab);
+  const sheetRendererPromise = loadSheetRenderer();
+  const workbookPromise = loadSheetWorkbookPayload();
+  const [sheetRenderer, workbook] = await Promise.all([sheetRendererPromise, workbookPromise]);
+  const state = readSheetWorkbookStateFromUrl(workbook, sheetRenderer.resolveSheetWorkbookSheet);
+  let activeSheet = sheetRenderer.resolveSheetWorkbookSheet(workbook, state.tab);
   const creditLabel = workbook.credit?.label ?? "Original sheet by SeaSmoke#0002";
   const creditUrl = workbook.credit?.url ?? null;
 
@@ -504,7 +502,7 @@ async function renderSheet(status: MirrorStatus) {
     "sheet",
     `
       <main class="page page--sheet">
-        <style id="sheet-workbook-inline-styles">${renderSheetWorkbookStyleRules(workbook.styles)}</style>
+        <style id="sheet-workbook-inline-styles">${sheetRenderer.renderSheetWorkbookStyleRules(workbook.styles)}</style>
         <section class="sheet-workbook">
           <div class="sheet-workbook__panel sheet-workbook__masthead">
             <div class="sheet-workbook__title-row">
@@ -573,8 +571,8 @@ async function renderSheet(status: MirrorStatus) {
   const tabButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-sheet-tab]")];
 
   const renderWorkbook = () => {
-    activeSheet = resolveSheetWorkbookSheet(workbook, state.tab);
-    const rendered = renderSheetWorkbookGrid(workbook, activeSheet, state.query);
+    activeSheet = sheetRenderer.resolveSheetWorkbookSheet(workbook, state.tab);
+    const rendered = sheetRenderer.renderSheetWorkbookGrid(workbook, activeSheet, state.query);
 
     grid.innerHTML = rendered.html;
 
@@ -1798,9 +1796,12 @@ function syncCatalogStateToUrl(state: CatalogState) {
   window.history.replaceState(null, "", nextUrl);
 }
 
-function readSheetWorkbookStateFromUrl(workbook: SheetWorkbookPayload): SheetWorkbookState {
+function readSheetWorkbookStateFromUrl(
+  workbook: SheetWorkbookPayload,
+  resolveSheet: (workbook: SheetWorkbookPayload, slug: string | null | undefined) => SheetWorkbookSheet,
+): SheetWorkbookState {
   const params = new URLSearchParams(window.location.search);
-  const activeSheet = resolveSheetWorkbookSheet(workbook, params.get("tab"));
+  const activeSheet = resolveSheet(workbook, params.get("tab"));
   return {
     tab: activeSheet.slug,
     query: params.get("find")?.trim() ?? "",
@@ -2004,6 +2005,11 @@ async function loadSheetWorkbookPayload(): Promise<SheetWorkbookPayload> {
     cachedSheetWorkbookPromise = fetchJson<SheetWorkbookPayload>(`${DATA_ROOT}/sheet-workbook.json`);
   }
   return cachedSheetWorkbookPromise;
+}
+
+function loadSheetRenderer() {
+  cachedSheetRendererPromise ??= import("./sheet-workbook");
+  return cachedSheetRendererPromise;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
