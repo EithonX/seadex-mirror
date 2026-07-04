@@ -6,6 +6,11 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distDir = join(repoRoot, "dist");
 const assetsDir = join(distDir, "assets");
 const indexHtmlPath = join(distDir, "index.html");
+const mirrorDataDir = join(distDir, "mirror-data");
+const mirrorEntriesDir = join(mirrorDataDir, "entries");
+const mirrorStatusPath = join(mirrorDataDir, "status.json");
+const mirrorCatalogPath = join(mirrorDataDir, "catalog.json");
+const mirrorSheetWorkbookPath = join(mirrorDataDir, "sheet-workbook.json");
 
 function fail(message) {
   console.error(`Frontend build verification failed: ${message}`);
@@ -51,8 +56,43 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+async function readJsonFile(path, label) {
+  await assertFile(path, label);
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    fail(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 await assertFile(indexHtmlPath, "dist/index.html");
 await assertDirectory(assetsDir, "dist/assets");
+await assertDirectory(mirrorDataDir, "dist/mirror-data");
+await assertDirectory(mirrorEntriesDir, "dist/mirror-data/entries");
+
+const [statusPayload, catalogPayload, sheetWorkbookPayload, mirrorEntryFiles] = await Promise.all([
+  readJsonFile(mirrorStatusPath, "dist/mirror-data/status.json"),
+  readJsonFile(mirrorCatalogPath, "dist/mirror-data/catalog.json"),
+  readJsonFile(mirrorSheetWorkbookPath, "dist/mirror-data/sheet-workbook.json"),
+  readdir(mirrorEntriesDir, { withFileTypes: true }),
+]);
+
+if (!statusPayload || typeof statusPayload !== "object") {
+  fail("dist/mirror-data/status.json must contain a JSON object.");
+}
+
+if (!Array.isArray(catalogPayload?.items)) {
+  fail("dist/mirror-data/catalog.json must contain an items array.");
+}
+
+if (!Array.isArray(sheetWorkbookPayload?.sheets)) {
+  fail("dist/mirror-data/sheet-workbook.json must contain a sheets array.");
+}
+
+const entryJsonFiles = mirrorEntryFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
+if (entryJsonFiles.length === 0) {
+  fail("dist/mirror-data/entries does not contain any entry JSON files.");
+}
 
 const [indexHtml, assetEntries] = await Promise.all([
   readFile(indexHtmlPath, "utf8"),
@@ -115,4 +155,6 @@ if (staticImportFound) {
   fail("main entry statically imports the sheet-workbook chunk.");
 }
 
-console.log(`Frontend build verified: ${entryFile} lazy-loads ${sheetChunks.join(", ")}.`);
+console.log(
+  `Frontend build verified: ${entryFile} lazy-loads ${sheetChunks.join(", ")}; copied mirror data verified.`,
+);
