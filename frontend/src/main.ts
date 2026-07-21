@@ -825,25 +825,28 @@ function renderAbout(status: MirrorStatus) {
               <p class="about-lead">
                 This is a backup mirror of releases.moe in case the original site is down, slow, or temporarily unavailable. The goal is to keep the public data readable and easy to access, not to replace the upstream project.
               </p>
-              <div class="about-pill-row">
-                <span class="about-pill">Backup mirror</span>
-                <span class="about-pill">Fast access</span>
-                <span class="about-pill">No trackers</span>
-                <span class="about-pill">Upstream links</span>
-              </div>
             </div>
 
             <div class="about-stats">
               <div class="about-stat">
-                <span class="about-stat__label">Mirrored entries</span>
+                <span class="about-stat__label">
+                  <span class="stat-label-full">Mirrored entries</span>
+                  <span class="stat-label-short">Entries</span>
+                </span>
                 <strong>${status.counts.entries.toLocaleString()}</strong>
               </div>
               <div class="about-stat">
-                <span class="about-stat__label">Torrent rows</span>
+                <span class="about-stat__label">
+                  <span class="stat-label-full">Torrent rows</span>
+                  <span class="stat-label-short">Torrents</span>
+                </span>
                 <strong>${status.counts.torrents.toLocaleString()}</strong>
               </div>
               <div class="about-stat">
-                <span class="about-stat__label">Last rebuild</span>
+                <span class="about-stat__label">
+                  <span class="stat-label-full">Last rebuild</span>
+                  <span class="stat-label-short">Updated</span>
+                </span>
                 <strong>${escapeHtml(rebuiltLabel)}</strong>
               </div>
             </div>
