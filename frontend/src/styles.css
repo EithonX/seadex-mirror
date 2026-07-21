@@ -2277,22 +2277,30 @@ img {
 }
 
 .catalog-skeleton__toolbar-search {
-  height: 2.75rem;
-  flex: 1;
+  height: 2.35rem;
+  flex: 1 1 auto;
   min-width: 12rem;
-  border-radius: var(--radius-sm);
-}
-
-.catalog-skeleton__toolbar-filters {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  border-radius: 0.5rem;
 }
 
 .catalog-skeleton__toolbar-filter {
-  height: 2.75rem;
-  width: 8rem;
-  border-radius: var(--radius-sm);
+  height: 2.35rem;
+  width: 7.5rem;
+  border-radius: 0.5rem;
+}
+
+.catalog-skeleton__mobile-filter-btn {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .catalog-skeleton__mobile-filter-btn {
+    display: block;
+    width: 5.5rem;
+    height: 2.35rem;
+    border-radius: 0.5rem;
+    flex-shrink: 0;
+  }
 }
 
 .catalog-skeleton__rows {

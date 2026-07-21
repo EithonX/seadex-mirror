@@ -42,11 +42,21 @@ export function renderCatalogSkeleton(): string {
     <section class="catalog-page catalog-page--skeleton" aria-busy="true">
       <span class="skeleton-sr">Loading mirrored catalog...</span>
       <div class="catalog-toolbar catalog-skeleton__toolbar" aria-hidden="true">
-        <div class="skeleton-block catalog-skeleton__toolbar-search"></div>
-        <div class="catalog-skeleton__toolbar-filters">
-          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
-          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
-          <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+        <div class="catalog-toolbar__group catalog-toolbar__group--search">
+          <div class="skeleton-block catalog-skeleton__toolbar-search"></div>
+          <div class="skeleton-block catalog-skeleton__mobile-filter-btn"></div>
+        </div>
+        <div class="catalog-toolbar__filters catalog-skeleton__toolbar-filters">
+          <div class="catalog-toolbar__filters-inner">
+            <div class="catalog-toolbar__group catalog-toolbar__group--grow">
+              <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+              <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+              <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+            </div>
+            <div class="catalog-toolbar__group">
+              <div class="skeleton-block catalog-skeleton__toolbar-filter"></div>
+            </div>
+          </div>
         </div>
       </div>
 
