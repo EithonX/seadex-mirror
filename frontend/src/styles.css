@@ -3531,6 +3531,47 @@ img {
   line-height: 1.65;
 }
 
+.upstream-links-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.upstream-text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.925rem;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.2s ease, text-decoration-color 0.2s ease;
+}
+
+.upstream-text-link:hover {
+  color: var(--accent, #3b82f6);
+}
+
+.upstream-text-link__arrow {
+  font-size: 0.85em;
+  opacity: 0.6;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.upstream-text-link:hover .upstream-text-link__arrow {
+  opacity: 1;
+  transform: translate(2px, -2px);
+}
+
+.upstream-links-sep {
+  color: var(--muted);
+  opacity: 0.35;
+  font-size: 0.75rem;
+}
+
 .github-profile-card {
   display: flex;
   flex-direction: column;

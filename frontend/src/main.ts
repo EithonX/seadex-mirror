@@ -852,7 +852,7 @@ function renderAbout(status: MirrorStatus) {
 
             <div class="about-list">
               <div class="about-block">
-                <h2>What this mirror is for</h2>
+                <h2>The Story Behind This Mirror</h2>
                 <p>Recently I faced issues with the SeaDex website because the AniList API was down. So I made this mirror website. This mirror is here as a backup in case the original site is unavailable. It is meant to give you another way to read the same public SeaDex information when you need it.</p>
               </div>
               <div class="about-block">
@@ -873,14 +873,15 @@ function renderAbout(status: MirrorStatus) {
               <div class="about-block">
                 <h2>Upstream pages</h2>
                 <p>If you want the original site or its own About page, use the links below.</p>
-                <div class="about-card__actions">
-                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_ABOUT_URL)}" target="_blank" rel="noreferrer">
-                    <span>${renderExternalIcon()}</span>
-                    <span>SeaDex about</span>
-                  </a>
-                  <a class="comparison-link comparison-link--secondary" href="${escapeHtml(UPSTREAM_SITE_URL)}" target="_blank" rel="noreferrer">
-                    <span>${renderLogInIcon()}</span>
+                <div class="upstream-links-row">
+                  <a href="${escapeHtml(UPSTREAM_SITE_URL)}" target="_blank" rel="noreferrer" class="upstream-text-link">
                     <span>releases.moe</span>
+                    <span class="upstream-text-link__arrow">&nearr;</span>
+                  </a>
+                  <span class="upstream-links-sep">&bull;</span>
+                  <a href="${escapeHtml(UPSTREAM_ABOUT_URL)}" target="_blank" rel="noreferrer" class="upstream-text-link">
+                    <span>SeaDex About</span>
+                    <span class="upstream-text-link__arrow">&nearr;</span>
                   </a>
                 </div>
               </div>
