@@ -441,8 +441,10 @@ img {
   opacity: 0.85;
 }
 
-.control-input:focus {
+.control-input:focus,
+.control-input:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 
 /* Premium Faceted Selects */
@@ -2709,6 +2711,10 @@ img {
   font-weight: 500;
 }
 
+.control-shell--dialog:focus-within {
+  box-shadow: none;
+}
+
 @media (min-width: 640px) {
   .search-dialog__panel {
     padding: 0;
@@ -3032,9 +3038,16 @@ img {
   width: 100%;
   border: 0;
   outline: 0;
+  box-shadow: none;
   background: transparent;
   color: var(--sheet-text);
   font: 400 0.82rem/1.2 Arial, sans-serif;
+}
+
+.sheet-workbook__search input:focus,
+.sheet-workbook__search input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .sheet-workbook__search input::placeholder {
