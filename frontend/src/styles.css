@@ -1,16 +1,17 @@
 :root {
   color-scheme: dark;
-  --bg: #09090b;
-  --bg-glow: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(164, 0, 0, 0.09), transparent);
-  --bg-elevated: rgba(9, 9, 11, 0.75);
-  --panel: rgba(17, 17, 19, 0.65);
-  --panel-soft: rgba(25, 25, 28, 0.85);
-  --card: rgba(15, 15, 17, 0.65);
-  --line: rgba(255, 255, 255, 0.13);
-  --line-strong: rgba(255, 255, 255, 0.22);
-  --text: #fafafa;
+  --bg: #070709;
+  --bg-glow: radial-gradient(ellipse 70% 45% at 50% -10%, rgba(164, 0, 0, 0.12), transparent);
+  --bg-elevated: rgba(7, 7, 9, 0.85);
+  --panel: rgba(18, 18, 22, 0.75);
+  --panel-soft: rgba(26, 26, 32, 0.90);
+  --card: rgba(18, 18, 22, 0.70);
+  --line: rgba(255, 255, 255, 0.24);
+  --line-strong: rgba(255, 255, 255, 0.42);
+  --border-width: 1.5px;
+  --text: #ffffff;
   --muted: #a1a1aa;
-  --muted-strong: #d4d4d8;
+  --muted-strong: #e4e4e7;
   --accent: #a40000;
   --accent-hover: #c40000;
   --accent-soft: rgba(164, 0, 0, 0.15);
@@ -44,8 +45,9 @@
   --panel: rgba(255, 255, 255, 0.8);
   --panel-soft: rgba(244, 244, 245, 0.9);
   --card: rgba(255, 255, 255, 0.75);
-  --line: rgba(9, 9, 11, 0.12);
-  --line-strong: rgba(9, 9, 11, 0.20);
+  --line: rgba(9, 9, 11, 0.22);
+  --line-strong: rgba(9, 9, 11, 0.40);
+  --border-width: 1.5px;
   --text: #09090b;
   --muted: #71717a;
   --muted-strong: #27272a;
@@ -1543,10 +1545,6 @@ img {
   flex-direction: column;
 }
 
-.entry-footer {
-  margin-top: auto;
-}
-
 /* Sheet page breaks out of the container to go full-bleed */
 .page--sheet {
   width: 100%;
@@ -1984,23 +1982,29 @@ img {
 .torrent-menu__item--private,
 .torrent-menu__item--muted {
   cursor: not-allowed;
-  color: var(--muted);
+  color: var(--text);
 }
 
-.torrent-button--private,
 .torrent-button--muted {
   cursor: not-allowed;
   opacity: 0.75;
 }
 
 .torrent-button--private {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: var(--line);
-  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface-subtle);
+  border-color: var(--line-strong);
+}
+
+.torrent-button--private .tracker-icon--lock {
+  opacity: 0.75;
+  color: var(--muted-strong);
 }
 
 :root[data-theme="light"] .torrent-button--private {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--surface-subtle);
 }
 
 /* Anime Notes segment */

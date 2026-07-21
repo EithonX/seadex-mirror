@@ -209,9 +209,6 @@ export function renderEntryLoading(): string {
           ${skeletonBlock("skeleton-notes")}
         </section>
       </div>
-      <div class="entry-skeleton__footer">
-        ${skeletonBlock("skeleton-line skeleton-line--footer")}
-      </div>
     </div>
   `;
 }
