@@ -285,12 +285,12 @@ img {
   margin-left: auto;
   font-size: 0.7rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  background: rgba(255, 255, 255, 0.05);
-  opacity: 0.7;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.3rem;
+  background: var(--chip-bg);
+  color: var(--muted);
 }
 
 :root[data-theme="light"] .header-search::after {
@@ -2931,7 +2931,7 @@ img {
   gap: 1rem;
   padding: 0.6rem 0.85rem;
   background: var(--sheet-panel-strong);
-  border-bottom: 1px solid var(--sheet-line);
+  border-bottom: none;
 }
 
 .sheet-workbook__title-row {
