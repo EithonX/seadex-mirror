@@ -457,19 +457,12 @@ async function renderCatalog(status: MirrorStatus) {
                 <button id="catalog-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
                 <button id="catalog-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
                 <button id="catalog-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
-              </div>
-            </div>
           </div>
-
-          <footer class="catalog-meta">
-            <span>${status.counts.entries} mirrored entries</span>
-            <span>${status.counts.torrents} torrent rows</span>
-            <span>Updated ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
-          </footer>
         </section>
       </main>
       ${renderSearchDialog()}
     `,
+    status,
   );
 
   wireCommonUi(status, "index");
@@ -771,6 +764,7 @@ async function renderSheet(status: MirrorStatus) {
       </main>
       ${renderSearchDialog()}
     `,
+    status,
   );
 
   wireCommonUi(status, "sheet");
@@ -896,6 +890,7 @@ function renderAbout(status: MirrorStatus) {
       </main>
       ${renderSearchDialog()}
     `,
+    status,
   );
 
   wireCommonUi(status, "about");
@@ -985,6 +980,7 @@ async function renderEntry(
         ${renderEntryContent(payload, status)}
         ${renderSearchDialog()}
       `,
+      status,
     );
 
     wireCommonUi(status, "entry");
@@ -996,6 +992,7 @@ async function renderEntry(
           ${renderEntryNotFound(alId)}
           ${renderSearchDialog()}
         `,
+        status,
       );
       wireCommonUi(status, "entry");
       setDocumentMeta(`Entry Not Found | SeaDex Mirror`);
@@ -1016,6 +1013,7 @@ async function renderEntry(
         ${renderEntryError(alId, displayMessage)}
         ${renderSearchDialog()}
       `,
+      status,
     );
     wireCommonUi(status, "entry");
     setDocumentMeta(`Error | SeaDex Mirror`);

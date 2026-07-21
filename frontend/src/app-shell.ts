@@ -1,13 +1,16 @@
-import { DEVELOPER_GITHUB_URL } from "./constants";
+import type { MirrorStatus } from "../../shared/mirror";
+import { DEVELOPER_GITHUB_URL, DEVELOPER_GITHUB_USERNAME } from "./constants";
+import { formatDate } from "./format";
 import { escapeHtml } from "./html";
 import { renderCloseIcon, renderMoonIcon, renderSearchIcon, renderSunIcon } from "./icons";
 
 export type PageContext = "index" | "entry" | "about" | "sheet";
 
-export function renderPageFrame(context: PageContext, content: string) {
+export function renderPageFrame(context: PageContext, content: string, status?: MirrorStatus) {
   return `
     ${renderShell(context)}
     ${content}
+    ${renderSiteFooter(status)}
   `;
 }
 
@@ -40,6 +43,36 @@ function renderShell(context: PageContext) {
         </div>
       </div>
     </header>
+  `;
+}
+
+export function renderSiteFooter(status?: MirrorStatus) {
+  const entriesCount = status ? status.counts.entries.toLocaleString() : "2,796";
+  const torrentsCount = status ? status.counts.torrents.toLocaleString() : "9,169";
+  const updatedDate = status && status.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : null;
+
+  return `
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div class="site-footer__left">
+          <span class="site-footer__brand">SeaDex Mirror</span>
+          <span class="site-footer__by">by <a href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">${escapeHtml(DEVELOPER_GITHUB_USERNAME)}</a></span>
+        </div>
+        <div class="site-footer__right">
+          <span class="stat-group"><strong class="stat-num">${entriesCount}</strong> entries</span>
+          <span class="stat-sep">&bull;</span>
+          <span class="stat-group"><strong class="stat-num">${torrentsCount}</strong> torrents</span>
+          ${
+            updatedDate
+              ? `
+                <span class="stat-sep stat-sep--time">&bull;</span>
+                <span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>
+              `
+              : ""
+          }
+        </div>
+      </div>
+    </footer>
   `;
 }
 

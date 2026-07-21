@@ -151,15 +151,6 @@ export function renderEntryContent(payload: EntryPayload, status: MirrorStatus):
           ${renderRelationsSection(entry.relations)}
         </section>
       </div>
-
-      <div class="entry-footer">
-        <section class="content-section content-section--subtle">
-          <div class="mirror-inline">
-            <span>${status.counts.entries} mirrored entries</span>
-            <span>Snapshot ${formatDate(status.sync.lastRebuildFinishedAt)}</span>
-          </div>
-        </section>
-      </div>
     </main>
   `;
 }
