@@ -1,158 +1,129 @@
-# SeaDex mirror
+# SeaDex Mirror
 
-This repo hosts an unofficial static mirror for `releases.moe`.
+[![License: GPL v3](https://img.shields.io/github/license/EithonX/seadex-mirror)](LICENSE)
+[![Mirror Rebuild](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/rebuild-mirror.yml?branch=main&label=mirror%20rebuild)](https://github.com/EithonX/seadex-mirror/actions/workflows/rebuild-mirror.yml)
+[![Deploy](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/deploy-site.yml?branch=main&label=deploy)](https://github.com/EithonX/seadex-mirror/actions/workflows/deploy-site.yml)
 
-The current architecture is intentionally simple:
+An unofficial static mirror of [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)), the anime release recommendation index. Built as a static site so the data stays accessible even when the original is down.
 
-- GitHub Actions or a local script fetch SeaDex public data plus AniList metadata
-- the build step writes static JSON into `frontend/public/mirror-data`
-- Vite builds a static frontend that reads those files directly
-- Cloudflare Pages serves the app as static assets
+**Live site:** [seadex.pages.dev](https://seadex.pages.dev)
 
-## Why this works
+## How it works
 
-The public SeaDex data is mostly read-heavy and changes far less often than users browse it. That makes a static snapshot a much better fit than a live database on a free-tier quota.
+```mermaid
+flowchart LR
+    A[SeaDex API] --> B[Build Script]
+    C[AniList API] --> B
+    B --> D[Static JSON]
+    D --> E[Vite Build]
+    E --> F[Cloudflare Pages]
+```
 
-## Core commands
+The build script pulls all public entry and torrent data from the SeaDex PocketBase API, enriches it with AniList metadata (titles, covers, scores, relations), and writes everything as static JSON files. Vite bundles the frontend, and the result gets deployed to Cloudflare Pages as a fully static site.
 
-Install dependencies:
+No database, no server-side runtime, no API keys required for browsing.
+
+## Getting started
+
+**Prerequisites:** Node.js 24+
 
 ```bash
+git clone https://github.com/EithonX/seadex-mirror.git
+cd seadex-mirror
 npm install
+npm run dev
 ```
 
-Typecheck:
-
-```bash
-npm run typecheck
-```
-
-Build the frontend:
-
-```bash
-npm run build:frontend
-```
-
-Verify generated mirror data:
-
-```bash
-npm run verify:mirror-data
-```
-
-Verify frontend build output:
-
-```bash
-npm run verify:frontend-build
-```
-
-Build a deployable site snapshot:
-
-```bash
-npm run build
-```
-
-Build local mirror data from live SeaDex + AniList:
+To build with live data from upstream:
 
 ```bash
 npm run data:build
+npm run dev
 ```
 
-Build data and static site together:
+## Commands
 
-```bash
-npm run build:site
-```
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the Vite dev server |
+| `npm run build` | Build a deployable site snapshot |
+| `npm run build:frontend` | Build only the frontend |
+| `npm run data:build` | Fetch live data from SeaDex + AniList |
+| `npm run build:site` | Build data and frontend together |
+| `npm run deploy` | Deploy to Cloudflare Pages |
+| `npm run typecheck` | Run TypeScript type checking |
+| `npm run verify:mirror-data` | Verify generated JSON structure |
+| `npm run verify:frontend-build` | Verify production build output |
 
-Deploy to Cloudflare Pages:
+## Data pipeline
 
-```bash
-npm run deploy
-```
+The build script ([`scripts/build-static-data.mjs`](scripts/build-static-data.mjs)):
 
-## Static data workflow
+1. Fetches entry IDs from the `listIDs` endpoint
+2. Fetches all entries with expanded torrent data (`expand=trs`)
+3. Verifies parity between the two data sources
+4. Resolves relative torrent URLs against `https://releases.moe`
+5. Fetches AniList metadata for each entry
+6. Enriches franchise relation data for entry detail pages
+7. Writes static JSON files into `frontend/public/mirror-data/`
 
-The intended flow is:
+### Output files
 
-1. run [`scripts/build-static-data.mjs`](scripts/build-static-data.mjs)
-2. write `status.json`, `catalog.json`, `sheet-workbook.json`, and `entries/<anilist-id>.json` into `frontend/public/mirror-data`
-3. build the frontend with Vite
-4. deploy the static output to Cloudflare Pages
+| File | Used by |
+|---|---|
+| `catalog.json` | Home page — table filtering and search |
+| `entries/<alId>.json` | Individual entry pages |
+| `sheet-workbook.json` | Sheet view (lazy-loaded separately) |
+| `status.json` | Mirror freshness indicator |
 
-The data builder has two intentional unchanged-upstream behaviors:
+### Unchanged-upstream behavior
 
-- `--onUnchanged=skip`
-  Use this for scheduled CI rebuilds. If the upstream probe signature matches the last deployed snapshot, the job exits without rebuilding local files or deploying again.
-- `--onUnchanged=materialize`
-  Use this for packaging or deploy builds. If upstream is unchanged but the local `frontend/public/mirror-data` folder is missing, the job reconstructs a complete local snapshot using the available cache instead of producing an empty site.
+The data builder supports two modes when upstream data hasn't changed:
 
-The static data builder:
+- **`--onUnchanged=skip`** — For scheduled CI rebuilds. Exits early without rebuilding or deploying.
+- **`--onUnchanged=materialize`** — For deploy builds. Reconstructs local data from cache when upstream is unchanged but local files are missing (e.g. fresh CI checkout).
 
-- fetches `listIDs`
-- fetches all public `entries` with `expand=trs`
-- verifies parity between those two source views
-- resolves relative torrent URLs against `https://releases.moe`
-- fetches AniList only for SeaDex entry IDs
-- enriches relation data for extra franchise context on entry pages
-- writes a full clean snapshot into static JSON files
+## Deployment
 
-## Frontend data loading
+Deployed to Cloudflare Pages through GitHub Actions using Wrangler Direct Upload.
 
-- Catalog pages read `catalog.json` for table filtering and global search.
-- Entry pages load `entries/<alId>.json` directly, without loading `catalog.json`.
-- `/sheet` loads `sheet-workbook.json` and lazy-loads the sheet workbook renderer as a separate frontend chunk.
+### Required secrets
 
-`npm run verify:mirror-data` checks that the expected generated JSON files exist and have the basic shape the frontend needs. `npm run verify:frontend-build` checks that the production build keeps the sheet renderer in its lazy chunk.
+| Secret | Purpose |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier |
+| `CLOUDFLARE_API_TOKEN` | API token with Pages deploy permissions |
 
-## Cache policy
+### Optional
 
-Cloudflare Pages headers keep freshness short for top-level mirror indexes:
+| Secret / Variable | Purpose |
+|---|---|
+| `CLOUDFLARE_PAGES_PROJECT_NAME` | Pages project name (default: `seadex`) |
+| `ANILIST_ACCESS_TOKEN` | Authenticated AniList access for higher rate limits |
 
-- `catalog.json`, `status.json`, and `sheet-workbook.json`: 60 seconds
-- `entries/*`: 900 seconds
+### Workflows
 
-Hashed frontend assets are cached immutably.
+[`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) runs every 12 hours. Only rebuilds and deploys when upstream data actually changed. Supports a manual `force` trigger.
 
-## Automation
+[`deploy-site.yml`](.github/workflows/deploy-site.yml) runs on pushes to `main` that touch frontend code, scripts, or build config. Uses `--onUnchanged=materialize` so frontend-only changes still deploy with complete data.
 
-Cloudflare Pages is the recommended deployment target because static asset requests are free and do not burn Workers request quota. The full enrichment pass should still happen outside Cloudflare at build time.
+### Cache policy
 
-The recommended automation path is the GitHub Actions workflow in `.github/workflows/rebuild-mirror.yml`.
+| Path | TTL |
+|---|---|
+| `catalog.json`, `status.json`, `sheet-workbook.json` | 60 seconds |
+| `entries/*` | 15 minutes |
+| Hashed frontend assets | Immutable |
 
-Required GitHub secrets:
+## Contributing
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
-Optional repository variables:
+## License
 
-- `CLOUDFLARE_PAGES_PROJECT_NAME`
-  Default expected project name: `seadex`
+[GNU General Public License v3.0](LICENSE)
 
-Optional GitHub secrets:
+## Credits
 
-- `ANILIST_ACCESS_TOKEN`
-  Recommended if you want authenticated AniList GraphQL access during snapshot builds.
-
-Workflow split:
-
-- `.github/workflows/rebuild-mirror.yml`
-  Scheduled every 12 hours and manually runnable. Uses `--onUnchanged=skip`, so it only rebuilds and deploys when upstream data actually changed. It also supports a manual `force` input.
-- `.github/workflows/deploy-site.yml`
-  Runs on `main` pushes that touch app/workflow/build files. Uses `--onUnchanged=materialize`, so frontend-only deploys still package a complete local snapshot even on fresh CI checkouts.
-
-Cloudflare Pages deployment note:
-
-- These workflows use Direct Upload through Wrangler and explicitly deploy to the production branch (`main`), so successful runs update `seadex.pages.dev` instead of only creating a preview deployment URL.
-
-## Frontend goals
-
-- stay close to SeaDex's editorial browsing feel
-- keep torrent choices readable on desktop and mobile
-- surface mirror freshness without turning the site into a dashboard
-- leave room for extra metadata such as franchise context
-
-## Notes
-
-- This mirror is unofficial.
-- Credit and source links should always point back to `releases.moe`.
-- AniList metadata is cached for mirrored SeaDex entries only.
+- [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)) — the upstream project this mirrors
+- [AniList](https://anilist.co) — anime metadata

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Upstream SeaDex
+    url: https://github.com/seadex-moe/seadex
+    about: For issues with SeaDex data itself (wrong entries, missing torrents), report them to the upstream project.
