@@ -33,7 +33,7 @@ jobs:
       CLOUDFLARE_PAGES_PRODUCTION_BRANCH: main
       MIRROR_STATUS_URL: ${{ format('https://{0}.pages.dev/mirror-data/status.json', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
