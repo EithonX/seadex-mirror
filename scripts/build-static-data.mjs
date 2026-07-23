@@ -1066,21 +1066,25 @@ function decodeJsEscapes(value) {
 }
 
 function stripHtmlTags(value) {
-  return String(value ?? "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "");
+  let str = String(value ?? "").replace(/<br\s*\/?>/gi, "\n");
+  let previous;
+  do {
+    previous = str;
+    str = str.replace(/<[^>]+>/g, "");
+  } while (str !== previous);
+  return str;
 }
 
 function decodeHtmlEntities(value) {
   return String(value ?? "")
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 10)))
-    .replace(/&#x([0-9A-Fa-f]+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
+    .replace(/&#x([0-9A-Fa-f]+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 16)))
+    .replace(/&amp;/g, "&");
 }
 
 function normalizeWorkbookBorder(border, themeColors) {
