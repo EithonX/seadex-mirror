@@ -1,5 +1,5 @@
 import type { MirrorStatus } from "../../shared/mirror";
-import { REPO_GITHUB_URL } from "./constants";
+import { DEVELOPER_GITHUB_URL, DEVELOPER_GITHUB_USERNAME, REPO_GITHUB_URL } from "./constants";
 import { formatDate } from "./format";
 import { escapeHtml } from "./html";
 import { renderCloseIcon, renderMoonIcon, renderSearchIcon, renderSunIcon } from "./icons";
