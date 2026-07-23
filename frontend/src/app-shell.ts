@@ -1,5 +1,5 @@
 import type { MirrorStatus } from "../../shared/mirror";
-import { DEVELOPER_GITHUB_URL, DEVELOPER_GITHUB_USERNAME } from "./constants";
+import { REPO_GITHUB_URL } from "./constants";
 import { formatDate } from "./format";
 import { escapeHtml } from "./html";
 import { renderCloseIcon, renderMoonIcon, renderSearchIcon, renderSunIcon } from "./icons";
@@ -25,7 +25,7 @@ function renderShell(context: PageContext) {
           </a>
           <nav class="site-nav" aria-label="Primary navigation">
             <a href="/about"${context === "about" ? ` aria-current="page"` : ""}>About</a>
-            <a href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="${escapeHtml(REPO_GITHUB_URL)}" target="_blank" rel="noreferrer">GitHub</a>
             <a href="/sheet"${context === "sheet" ? ` aria-current="page"` : ""}>Sheet</a>
           </nav>
         </div>

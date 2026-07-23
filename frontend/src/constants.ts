@@ -10,3 +10,5 @@ export const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
 export const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
 export const DEVELOPER_GITHUB_USERNAME = "EithonX";
 export const DEVELOPER_GITHUB_AVATAR_URL = "https://github.com/EithonX.png";
+
+export const REPO_GITHUB_URL = "https://github.com/EithonX/seadex-mirror";
