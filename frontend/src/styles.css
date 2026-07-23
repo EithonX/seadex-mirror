@@ -2480,77 +2480,69 @@ img {
    Sheet loading skeleton
    ========================================================================== */
 
-.sheet-skeleton__masthead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
+.sheet-skeleton__title {
+  height: 1.15rem;
+  width: 8.5rem;
+  border-radius: 4px;
 }
 
-.sheet-skeleton__title {
-  height: 1.6rem;
-  width: min(16rem, 60%);
+.sheet-skeleton__badge {
+  height: 0.85rem;
+  width: 3.2rem;
+  border-radius: 4px;
+}
+
+.sheet-skeleton__upstream {
+  height: 1.4rem;
+  width: 7.2rem;
   border-radius: 999px;
 }
 
-.sheet-skeleton__masthead-action {
-  height: 2.25rem;
-  width: 9rem;
-  border-radius: var(--radius-sm);
-}
-
-.sheet-skeleton__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.sheet-skeleton__tabs {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+.sheet-skeleton__credit {
+  height: 1.05rem;
+  width: 9.5rem;
+  border-radius: 4px;
 }
 
 .sheet-skeleton__tab {
-  height: 2.25rem;
-  width: 6rem;
-  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 1.55rem;
+  width: 5.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .sheet-skeleton__search {
-  height: 2.5rem;
-  width: min(18rem, 100%);
-  border-radius: var(--radius-sm);
+  height: 1.95rem;
+  width: 14rem;
+  max-width: 100%;
+  border-radius: 6px;
 }
 
-.sheet-skeleton__grid {
+.sheet-skeleton__head-line {
+  height: 1rem;
+  border-radius: 4px;
+}
+
+.sheet-skeleton__head-line--num {
+  width: 14px;
+  margin: 0 auto;
+}
+
+.sheet-skeleton__table .sheet-cell-body {
+  padding: 0.6rem 0.5rem;
+  min-height: 2.6rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-height: 60vh;
-  padding: 0.75rem;
+  align-items: center;
 }
 
-.sheet-skeleton__row {
-  display: grid;
-  grid-template-columns: minmax(160px, 2fr) repeat(3, minmax(80px, 1fr));
-  gap: 0.75rem;
+.sheet-skeleton__cell-line {
+  height: 1.1rem;
+  border-radius: 4px;
 }
 
-.sheet-skeleton__cell {
-  height: 2rem;
-  border-radius: var(--radius-sm);
-}
-
-.sheet-skeleton__cell--wide {
-  height: 2rem;
-}
-
-.sheet-skeleton__cell--short {
-  width: 70%;
+.sheet-skeleton__cell-line--num {
+  width: 16px;
+  margin: 0 auto;
 }
 
 /* ==========================================================================
@@ -3852,7 +3844,8 @@ img {
     gap: 0.5rem;
   }
 
-  .sheet-workbook__search {
+  .sheet-workbook__search,
+  .sheet-skeleton__search {
     width: 100%;
     min-width: 0;
   }
@@ -3944,7 +3937,8 @@ img {
     flex: 0 0 auto;
   }
 
-  .sheet-workbook__search {
+  .sheet-workbook__search,
+  .sheet-skeleton__search {
     width: 100%;
     max-width: 100%;
   }
