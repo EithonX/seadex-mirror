@@ -18,7 +18,6 @@ flowchart LR
     B --> E[Verified Static JSON]
     E --> F[Vite]
     F --> G[Cloudflare Pages]
-    E --> H[Recovery Archive]
 ```
 
 The builder pulls SeaDex entries and torrent data, mirrors the published workbook, enriches entries with AniList metadata, verifies the resulting snapshot, and writes static JSON for the frontend.

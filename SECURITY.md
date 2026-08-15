@@ -30,4 +30,4 @@ Out of scope:
 
 This project intentionally has no application server, login system, user database, or server-side session state. That reduces the public runtime attack surface, but the build pipeline remains security-sensitive because it holds deployment credentials and converts third-party data into published HTML/JSON.
 
-The workflows therefore scope secrets to individual steps, pin external Actions to immutable commit SHAs, validate externally sourced URLs before rendering, and cryptographically verify snapshots before deployment/archive.
+The workflows therefore scope secrets to individual steps, pin external Actions to immutable commit SHAs, validate externally sourced URLs before rendering, and cryptographically verify snapshots before deployment.
