@@ -66,8 +66,8 @@ AniList authentication is optional. Without a token, the builder uses the public
 
 The builder:
 
-1. Fetches the complete SeaDex entry collection with expanded torrent records.
-2. Requires two consecutive matching source captures before accepting the snapshot.
+1. Reads SeaDex's ID list and lightweight entry/torrent revision guards.
+2. Fetches the complete entry collection with expanded torrents and accepts it only if the guards remain unchanged.
 3. Mirrors the published workbook.
 4. Enriches entries with AniList metadata, using a TTL cache and stale fallback.
 5. Builds the snapshot in staging and verifies entry/torrent invariants.

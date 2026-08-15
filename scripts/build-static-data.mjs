@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
 import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer } from "./lib/http.mjs";
-import { fetchStableSeaDexSnapshot } from "./lib/seadex-source.mjs";
+import { fetchConsistentSeaDexSnapshot } from "./lib/seadex-source.mjs";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   buildSnapshotId,
@@ -24,7 +24,7 @@ const DEFAULT_ANILIST_BATCH_SIZE = 50;
 const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 4;
 const DEFAULT_ANILIST_CACHE_TTL_HOURS = 168;
-const DEFAULT_SOURCE_STABILITY_PASSES = 2;
+const DEFAULT_SOURCE_CAPTURE_ATTEMPTS = 4;
 const MAX_SOURCE_JSON_BYTES = 32 * 1024 * 1024;
 const MAX_WORKBOOK_BYTES = 64 * 1024 * 1024;
 const MAX_PUBLISHED_SHEET_HTML_BYTES = 16 * 1024 * 1024;
@@ -109,9 +109,9 @@ async function main() {
     args.anilistCacheTtlHours ?? process.env.ANILIST_CACHE_TTL_HOURS,
     DEFAULT_ANILIST_CACHE_TTL_HOURS,
   );
-  const sourceStabilityPasses = Math.max(
-    2,
-    parsePositiveInt(args.sourceStabilityPasses, DEFAULT_SOURCE_STABILITY_PASSES),
+  const sourceCaptureAttempts = parsePositiveInt(
+    args.sourceCaptureAttempts,
+    DEFAULT_SOURCE_CAPTURE_ATTEMPTS,
   );
   const anilistAccessToken = args.anilistToken ?? process.env.ANILIST_ACCESS_TOKEN ?? "";
   const anilistClientId = args.anilistClientId ?? process.env.ANILIST_CLIENT_ID ?? "";
@@ -136,17 +136,17 @@ async function main() {
   const remoteSnapshot = localSnapshot ? null : await loadRemoteStatus(statusUrl, retryLimit);
   const existingSnapshot = localSnapshot ?? remoteSnapshot;
 
-  logStep(`Fetching a stable SeaDex snapshot (${sourceStabilityPasses} matching pass(es) required)...`);
-  const sourceSnapshot = await fetchStableSeaDexSnapshot({
+  logStep(`Capturing a consistent SeaDex snapshot (up to ${sourceCaptureAttempts} attempt(s))...`);
+  const sourceSnapshot = await fetchConsistentSeaDexSnapshot({
     sourceBaseUrl,
     pageSize,
-    requiredPasses: sourceStabilityPasses,
+    maxAttempts: sourceCaptureAttempts,
     retryLimit,
     maxResponseBytes: MAX_SOURCE_JSON_BYTES,
     log: logStep,
   });
   logStep(
-    `Stable SeaDex snapshot confirmed: ${sourceSnapshot.entries.length} entries, fingerprint ${sourceSnapshot.seaDexFingerprint.slice(0, 12)}.`,
+    `Consistent SeaDex snapshot confirmed: ${sourceSnapshot.entries.length} entries on capture attempt ${sourceSnapshot.captureAttempt}, fingerprint ${sourceSnapshot.seaDexFingerprint.slice(0, 12)}.`,
   );
 
   logStep("Fetching published SeaDex sheet workbook...");
