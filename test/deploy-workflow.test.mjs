@@ -30,6 +30,7 @@ test("deploy workflow gates Cloudflare and Surge publication independently", () 
   assert.match(deployWorkflow, /- name: Deploy Surge mirror\n\s+if: .*steps\.surge-change\.outputs\.deploy == 'true'/u);
   assert.match(deployWorkflow, /Skip unchanged Cloudflare deployment/u);
   assert.match(deployWorkflow, /Skip unchanged Surge deployment/u);
+  assert.match(deployWorkflow, /surge \.\/dist .*2>&1 \| node scripts\/redact-surge-output\.mjs/u);
 });
 
 test("scheduled rebuild checks and repairs the secondary mirror even when source data is unchanged", () => {
@@ -37,6 +38,7 @@ test("scheduled rebuild checks and repairs the secondary mirror even when source
   assert.match(rebuildWorkflow, /node scripts\/check-site-peer\.mjs --report \.surge-health-report\.json/u);
   assert.match(rebuildWorkflow, /Restore verified production snapshot for mirror repair/u);
   assert.match(rebuildWorkflow, /steps\.surge-health\.outputs\.repair == 'true'/u);
+  assert.match(rebuildWorkflow, /surge \.\/dist .*2>&1 \| node scripts\/redact-surge-output\.mjs/u);
 });
 
 test("test-only and rebuild-workflow-only changes do not trigger a site deployment workflow", () => {

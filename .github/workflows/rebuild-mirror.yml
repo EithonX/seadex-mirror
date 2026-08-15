@@ -211,7 +211,7 @@ jobs:
             echo "SURGE_TOKEN is required when the Surge mirror needs publication." >&2
             exit 1
           fi
-          npm exec --yes --package="surge@${SURGE_CLI_VERSION}" -- surge ./dist "https://${SURGE_DOMAIN}" --message "snapshot ${SNAPSHOT_ID}"
+          npm exec --yes --package="surge@${SURGE_CLI_VERSION}" -- surge ./dist "https://${SURGE_DOMAIN}" --message "snapshot ${SNAPSHOT_ID}" 2>&1 | node scripts/redact-surge-output.mjs
 
       - name: Verify Surge mirror
         if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && steps.surge-change.outputs.deploy == 'true' && steps.deploy-surge.outcome == 'success' }}
