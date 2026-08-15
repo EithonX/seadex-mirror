@@ -4,7 +4,7 @@ SeaDex Mirror is an unofficial static mirror of [SeaDex](https://releases.moe). 
 
 ## Setup
 
-Use Node.js 24.x and the committed lockfile:
+Use Node.js 24.x (LTS) or Node.js 26.x (Current) and the committed lockfile. CI uses Node.js 24.x:
 
 ```bash
 git clone https://github.com/EithonX/seadex-mirror.git

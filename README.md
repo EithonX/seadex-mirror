@@ -110,7 +110,7 @@ Then deploy the verified static build normally.
 
 ## Getting started
 
-**Prerequisite:** Node.js 24.x
+**Prerequisite:** Node.js 24.x (LTS) or Node.js 26.x (Current). CI uses Node.js 24.x.
 
 ```bash
 git clone https://github.com/EithonX/seadex-mirror.git

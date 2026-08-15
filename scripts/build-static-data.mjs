@@ -2,11 +2,10 @@ import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promise
 import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
-import { fetchWithRetry, readJsonResponse, readResponseBuffer, readTextResponse } from "./lib/http.mjs";
-import { validateSeaDexSnapshot } from "./lib/source-integrity.mjs";
+import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer } from "./lib/http.mjs";
+import { fetchStableSeaDexSnapshot } from "./lib/seadex-source.mjs";
 import {
   SNAPSHOT_SCHEMA_VERSION,
-  buildSeaDexFingerprint,
   buildSnapshotId,
   buildSourceFingerprint,
   createSnapshotManifest,
@@ -20,7 +19,7 @@ const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const DEFAULT_SHEET_WORKBOOK_URL =
   "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/export?format=xlsx";
-const DEFAULT_SOURCE_PAGE_SIZE = 100;
+const DEFAULT_SOURCE_PAGE_SIZE = 500;
 const DEFAULT_ANILIST_BATCH_SIZE = 50;
 const DEFAULT_ANILIST_DELAY_MS = 2200;
 const DEFAULT_RETRY_LIMIT = 4;
@@ -138,12 +137,14 @@ async function main() {
   const existingSnapshot = localSnapshot ?? remoteSnapshot;
 
   logStep(`Fetching a stable SeaDex snapshot (${sourceStabilityPasses} matching pass(es) required)...`);
-  const sourceSnapshot = await fetchStableSourceSnapshot(
+  const sourceSnapshot = await fetchStableSeaDexSnapshot({
     sourceBaseUrl,
     pageSize,
-    sourceStabilityPasses,
+    requiredPasses: sourceStabilityPasses,
     retryLimit,
-  );
+    maxResponseBytes: MAX_SOURCE_JSON_BYTES,
+    log: logStep,
+  });
   logStep(
     `Stable SeaDex snapshot confirmed: ${sourceSnapshot.entries.length} entries, fingerprint ${sourceSnapshot.seaDexFingerprint.slice(0, 12)}.`,
   );
@@ -1542,116 +1543,6 @@ function compareStrings(left, right) {
   return left.localeCompare(right);
 }
 
-async function fetchStableSourceSnapshot(sourceBaseUrl, pageSize, requiredPasses, retryLimit) {
-  let previousFingerprint = null;
-  let stablePasses = 0;
-  let latest = null;
-  const maxPasses = requiredPasses + 2;
-
-  for (let pass = 1; pass <= maxPasses; pass += 1) {
-    logStep(`SeaDex stability pass ${pass}/${maxPasses}...`);
-    const listIds = await fetchListIds(sourceBaseUrl, retryLimit);
-    const sourceSnapshot = await fetchSourceSnapshot(sourceBaseUrl, pageSize, retryLimit);
-    validateSeaDexSnapshot(listIds, sourceSnapshot.entries);
-    const fingerprint = buildSeaDexFingerprint(listIds, sourceSnapshot.entries);
-    latest = { listIds, entries: sourceSnapshot.entries, seaDexFingerprint: fingerprint };
-
-    if (fingerprint === previousFingerprint) {
-      stablePasses += 1;
-    } else {
-      stablePasses = 1;
-      previousFingerprint = fingerprint;
-    }
-
-    if (stablePasses >= requiredPasses) {
-      return latest;
-    }
-
-    if (pass < maxPasses) {
-      logStep("SeaDex changed between reads; repeating until two full snapshots agree.");
-    }
-  }
-
-  throw new Error(
-    `SeaDex did not produce ${requiredPasses} consecutive identical full snapshots after ${maxPasses} passes. Previous mirror retained.`,
-  );
-}
-
-async function fetchListIds(sourceBaseUrl, retryLimit) {
-  const endpoint = new URL("/api/listIDs", sourceBaseUrl);
-  const response = await fetchWithRetry(
-    endpoint,
-    { headers: { accept: "text/plain" } },
-    { retries: retryLimit, label: "SeaDex listIDs" },
-  );
-  const text = await readTextResponse(response, {
-    maxBytes: 4 * 1024 * 1024,
-    label: "SeaDex listIDs",
-  });
-  const ids = text
-    .split(",")
-    .map((value) => Number(value.trim()))
-    .filter((value) => Number.isInteger(value) && value > 0);
-
-  if (ids.length === 0) {
-    throw new Error("SeaDex listIDs returned no valid IDs.");
-  }
-  if (new Set(ids).size !== ids.length) {
-    throw new Error("SeaDex listIDs returned duplicate IDs.");
-  }
-  return ids;
-}
-
-async function fetchSourceSnapshot(sourceBaseUrl, pageSize, retryLimit) {
-  const endpoint = new URL("/api/collections/entries/records", sourceBaseUrl);
-  const entries = [];
-  let page = 1;
-
-  while (true) {
-    endpoint.searchParams.set("page", String(page));
-    endpoint.searchParams.set("perPage", String(pageSize));
-    endpoint.searchParams.set("sort", "-updated");
-    endpoint.searchParams.set("skipTotal", "1");
-    endpoint.searchParams.set("expand", "trs");
-
-    const response = await fetchWithRetry(
-      endpoint,
-      { headers: { accept: "application/json" } },
-      { retries: retryLimit, label: `SeaDex entries page ${page}` },
-    );
-    const payload = await readJsonResponse(response, {
-      maxBytes: MAX_SOURCE_JSON_BYTES,
-      label: `SeaDex entries page ${page}`,
-    });
-    const items = Array.isArray(payload?.items) ? payload.items : [];
-    entries.push(...items);
-    logStep(`Fetched source page ${page} with ${items.length} rows (${entries.length} accumulated).`);
-
-    if (items.length < pageSize) {
-      break;
-    }
-    page += 1;
-    if (page > 100_000) {
-      throw new Error("SeaDex pagination exceeded the safety ceiling.");
-    }
-  }
-
-  const deduped = [];
-  const seen = new Set();
-  for (const entry of entries) {
-    if (!Number.isInteger(entry?.alID) || entry.alID <= 0) {
-      throw new Error("SeaDex entries response contains a row without a valid alID.");
-    }
-    if (seen.has(entry.alID)) {
-      throw new Error(`SeaDex entries response contains duplicate AniList ID ${entry.alID}.`);
-    }
-    seen.add(entry.alID);
-    deduped.push(entry);
-  }
-
-  return { entries: deduped };
-}
-
 async function fetchAniListSnapshot(
   endpoint,
   ids,
@@ -1960,5 +1851,9 @@ function logStep(message) {
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
+  if (error instanceof HttpRequestError && error.url) {
+    console.error(`${PROGRESS_PREFIX} Failing request: ${error.url}`);
+  }
+  console.error(`${PROGRESS_PREFIX} Snapshot build aborted; any previous mirror data was left untouched.`);
   process.exitCode = 1;
 });

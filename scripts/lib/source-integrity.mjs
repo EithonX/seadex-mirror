@@ -1,30 +1,44 @@
-export function validateSeaDexSnapshot(listIds, entries) {
-  const listIdSet = new Set(listIds);
-  const entryIdSet = new Set(entries.map((entry) => entry?.alID));
+export function validateSeaDexSnapshot(listIdsOrEntries, maybeEntries) {
+  const hasIndependentIdList = Array.isArray(maybeEntries);
+  const entries = hasIndependentIdList ? maybeEntries : listIdsOrEntries;
+  const listIds = hasIndependentIdList ? listIdsOrEntries : null;
 
-  if (listIdSet.size !== listIds.length) {
-    throw new Error("SeaDex listIDs contains duplicate IDs.");
+  if (!Array.isArray(entries)) {
+    throw new TypeError("SeaDex entries must be an array.");
   }
-  if (entryIdSet.has(undefined) || entryIdSet.has(null)) {
+
+  const entryIds = entries.map((entry) => entry?.alID);
+  const entryIdSet = new Set(entryIds);
+  if (entryIds.some((id) => !Number.isInteger(id) || id <= 0)) {
     throw new Error("SeaDex entries contain a row without a valid alID.");
   }
   if (entryIdSet.size !== entries.length) {
     throw new Error("SeaDex entries contain duplicate alIDs.");
   }
-  if (listIdSet.size !== entryIdSet.size) {
-    throw new Error(
-      `SeaDex parity failure: listIDs has ${listIdSet.size} ids but expanded entries returned ${entryIdSet.size}.`,
-    );
-  }
 
-  for (const id of listIdSet) {
-    if (!entryIdSet.has(id)) {
-      throw new Error(`SeaDex parity failure: AniList ${id} exists in listIDs but not in expanded entries.`);
+  if (listIds !== null) {
+    const listIdSet = new Set(listIds);
+    if (listIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+      throw new Error("SeaDex listIDs contains an invalid ID.");
     }
-  }
-  for (const id of entryIdSet) {
-    if (!listIdSet.has(id)) {
-      throw new Error(`SeaDex parity failure: expanded AniList ${id} does not exist in listIDs.`);
+    if (listIdSet.size !== listIds.length) {
+      throw new Error("SeaDex listIDs contains duplicate IDs.");
+    }
+    if (listIdSet.size !== entryIdSet.size) {
+      throw new Error(
+        `SeaDex parity failure: listIDs has ${listIdSet.size} ids but expanded entries returned ${entryIdSet.size}.`,
+      );
+    }
+
+    for (const id of listIdSet) {
+      if (!entryIdSet.has(id)) {
+        throw new Error(`SeaDex parity failure: AniList ${id} exists in listIDs but not in expanded entries.`);
+      }
+    }
+    for (const id of entryIdSet) {
+      if (!listIdSet.has(id)) {
+        throw new Error(`SeaDex parity failure: expanded AniList ${id} does not exist in listIDs.`);
+      }
     }
   }
 

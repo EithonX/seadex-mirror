@@ -27,3 +27,7 @@ test("torrent parity rejects duplicate linked or expanded IDs", () => {
 test("torrent parity rejects same-length but different torrent sets", () => {
   assert.throws(() => validateEntryTorrents(entry(1, ["a", "b"], ["a", "c"])), /missing from expand\.trs|not linked by trs/);
 });
+test("SeaDex integrity can validate the authoritative records collection without listIDs", () => {
+  assert.doesNotThrow(() => validateSeaDexSnapshot([entry(1, ["a"]), entry(2, [])]));
+  assert.throws(() => validateSeaDexSnapshot([entry(1, []), entry(1, [])]), /duplicate alIDs/);
+});
