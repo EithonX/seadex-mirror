@@ -178,6 +178,7 @@ async function main() {
         startedAt,
         onUnchanged,
         sourceCheck: "confirmed-lightweight-guard",
+        aniListCacheRefreshDue: preflight.aniListRefreshDue,
       });
       await writeOptionalReport(reportPath, report);
       console.log(JSON.stringify(report, null, 2));
@@ -270,6 +271,11 @@ async function main() {
   logStep(
     `AniList metadata ready for ${anilistResult.media.size} entries (${anilistResult.stats.reusedFresh} fresh cache, ${anilistResult.stats.fetched} refreshed, ${anilistResult.stats.staleFallback} stale fallback).`,
   );
+  assertAniListEnrichmentSafe({
+    anilistResult,
+    existingSnapshot,
+    sourceEntryCount: sourceSnapshot.entries.length,
+  });
 
   const priorStartedAt = existingSnapshot?.status?.sync?.lastRebuildStartedAt ?? null;
   const priorFinishedAt = existingSnapshot?.status?.sync?.lastRebuildFinishedAt ?? null;
@@ -372,9 +378,12 @@ async function checkLightweightSources(options) {
     logStep("Authoritative source guards changed; a full SeaDex capture is required.");
     return { unchanged: false, sheetSnapshot, initialGuard: firstGuard };
   }
-  if (aniListRefreshDue) {
-    logStep("AniList cache refresh is due; a full SeaDex capture is required before rebuilding.");
+  if (refreshAniList) {
+    logStep("Explicit AniList refresh requested; a full SeaDex capture is required before rebuilding.");
     return { unchanged: false, sheetSnapshot, initialGuard: firstGuard };
+  }
+  if (aniListRefreshDue) {
+    logStep("AniList cache refresh is due, but authoritative source data is unchanged; deferring enrichment refresh until a rebuild or explicit refresh.");
   }
 
   logStep("Source guards match the last verified snapshot; confirming once more before skipping.");
@@ -401,7 +410,7 @@ async function checkLightweightSources(options) {
     return { unchanged: false, sheetSnapshot, initialGuard: confirmationGuard };
   }
 
-  return { unchanged: true, sheetSnapshot, initialGuard: confirmationGuard };
+  return { unchanged: true, sheetSnapshot, initialGuard: confirmationGuard, aniListRefreshDue };
 }
 
 function buildSkippedReport(options) {
@@ -413,6 +422,7 @@ function buildSkippedReport(options) {
     onUnchanged,
     sourceCheck,
     sourceFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint ?? null,
+    aniListCacheRefreshDue = false,
   } = options;
 
   return {
@@ -431,7 +441,7 @@ function buildSkippedReport(options) {
     onUnchanged,
     entries: existingSnapshot?.status?.counts?.entries ?? null,
     torrents: existingSnapshot?.status?.counts?.torrents ?? null,
-    aniListCacheRefreshDue: false,
+    aniListCacheRefreshDue,
   };
 }
 
@@ -551,14 +561,88 @@ async function loadRemoteStatus(statusUrl, retryLimit) {
       throw new Error("Remote status source fingerprint does not match manifest.json.");
     }
 
+    const aniListCache = buildAniListCacheMap(cachePayload);
+    validateRemoteAniListCacheCount(status, aniListCache);
     return {
       origin: "remote",
       status,
-      aniListCache: buildAniListCacheMap(cachePayload),
+      aniListCache,
     };
   } catch (error) {
-    console.warn(`${PROGRESS_PREFIX} Could not reuse the remote snapshot cache: ${errorMessage(error)}`);
+    console.warn(`${PROGRESS_PREFIX} Could not reuse the verified remote snapshot cache: ${errorMessage(error)}`);
+  }
+
+  // Pre-manifest deployments are a one-time migration case. They cannot be
+  // trusted for change detection, but their AniList cache is still valuable
+  // enrichment data when a fresh CI runner cannot reach AniList. This fallback
+  // validates the legacy status/cache pair and is never eligible for fast skip.
+  try {
+    const legacySnapshot = await loadLegacyRemoteAniListCache(statusUrl, retryLimit);
+    console.warn(
+      `${PROGRESS_PREFIX} Reusing a validated legacy remote AniList cache for bootstrap only; a full SeaDex capture is still required.`,
+    );
+    return legacySnapshot;
+  } catch (error) {
+    console.warn(`${PROGRESS_PREFIX} Could not reuse the legacy remote AniList cache: ${errorMessage(error)}`);
     return null;
+  }
+}
+
+async function loadLegacyRemoteAniListCache(statusUrl, retryLimit) {
+  const cacheUrl = new URL("anilist-cache.json", statusUrl).toString();
+  const [statusResponse, cacheResponse] = await Promise.all([
+    fetchWithRetry(
+      statusUrl,
+      { headers: { accept: "application/json", "cache-control": "no-cache" } },
+      { retries: retryLimit, label: "Legacy remote snapshot status" },
+    ),
+    fetchWithRetry(
+      cacheUrl,
+      { headers: { accept: "application/json", "cache-control": "no-cache" } },
+      { retries: retryLimit, label: "Legacy remote AniList cache" },
+    ),
+  ]);
+  const [status, cachePayload] = await Promise.all([
+    readJsonResponse(statusResponse, {
+      maxBytes: 2 * 1024 * 1024,
+      label: "Legacy remote snapshot status",
+    }),
+    readJsonResponse(cacheResponse, {
+      maxBytes: 32 * 1024 * 1024,
+      label: "Legacy remote AniList cache",
+    }),
+  ]);
+
+  const entries = Number(status?.counts?.entries);
+  const torrents = Number(status?.counts?.torrents);
+  const aniListMedia = Number(status?.counts?.anilistMedia);
+  if (!Number.isInteger(entries) || entries <= 0) {
+    throw new Error("Legacy remote status has no valid positive entry count.");
+  }
+  if (!Number.isInteger(torrents) || torrents < 0) {
+    throw new Error("Legacy remote status has no valid torrent count.");
+  }
+  if (!Number.isInteger(aniListMedia) || aniListMedia <= 0 || aniListMedia > entries) {
+    throw new Error("Legacy remote status has no valid AniList media count.");
+  }
+
+  const aniListCache = buildAniListCacheMap(cachePayload);
+  validateRemoteAniListCacheCount(status, aniListCache);
+
+  return {
+    origin: "remote-legacy-cache",
+    status,
+    aniListCache,
+  };
+}
+
+function validateRemoteAniListCacheCount(status, aniListCache) {
+  const expected = Number(status?.counts?.anilistMedia);
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error("Remote status has no valid AniList media count.");
+  }
+  if (aniListCache.size !== expected) {
+    throw new Error(`Remote AniList cache count mismatch (${aniListCache.size} records vs ${expected} expected).`);
   }
 }
 
@@ -615,6 +699,10 @@ function validateSnapshotSourceRevisionForReuse(status) {
 }
 
 function getStoredSourceRevision(existingSnapshot) {
+  if (existingSnapshot?.origin === "remote-legacy-cache") {
+    return null;
+  }
+
   const sourceFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint;
   const snapshotId = existingSnapshot?.status?.snapshot?.id;
   if (!/^[a-f0-9]{64}$/u.test(String(sourceFingerprint ?? ""))) {
@@ -1851,6 +1939,15 @@ async function fetchAniListSnapshot(
       `AniList batch ${index + 1}/${batches.length} finished (${returnedById.size} fetched, ${media.size} total resolved).`,
     );
 
+    if (!payload && isTerminalAniListAvailabilityError(requestError) && index < batches.length - 1) {
+      const remainingIds = batches.slice(index + 1).flat();
+      const fallback = retainAniListCacheFallbacks(remainingIds, existingCache, media, cache, stats);
+      console.warn(
+        `${PROGRESS_PREFIX} AniList returned HTTP 403; stopping ${batches.length - index - 1} remaining batch request(s). Retained ${fallback.retained} cached record(s), with ${fallback.unresolved} unresolved.`,
+      );
+      break;
+    }
+
     if (index < batches.length - 1 && delayMs > 0) {
       await sleep(delayMs);
     }
@@ -1863,6 +1960,55 @@ async function fetchAniListSnapshot(
   }
 
   return { media, cache, stats };
+}
+
+function retainAniListCacheFallbacks(ids, existingCache, media, cache, stats) {
+  let retained = 0;
+  let unresolved = 0;
+
+  for (const id of ids) {
+    const cached = existingCache.get(id) ?? null;
+    if (cached?.media) {
+      media.set(id, cached.media);
+      cache.set(id, cached);
+      stats.staleFallback += 1;
+      retained += 1;
+    } else {
+      stats.unresolved += 1;
+      unresolved += 1;
+    }
+  }
+
+  return { retained, unresolved };
+}
+
+function isTerminalAniListAvailabilityError(error) {
+  return error instanceof HttpRequestError && error.status === 403;
+}
+
+function assertAniListEnrichmentSafe({ anilistResult, existingSnapshot, sourceEntryCount }) {
+  if (sourceEntryCount <= 0) {
+    return;
+  }
+
+  const previousAniListCount = Number(existingSnapshot?.status?.counts?.anilistMedia);
+  const hasUsablePreviousCount = Number.isInteger(previousAniListCount) && previousAniListCount > 0;
+
+  if (!hasUsablePreviousCount) {
+    if (anilistResult.stats.unresolved > 0) {
+      throw new Error(
+        `AniList enrichment has ${anilistResult.stats.unresolved} unresolved record(s) and no complete previous cache is available; refusing to publish a degraded snapshot.`,
+      );
+    }
+    return;
+  }
+
+  const minimumPreservedCount = Math.min(previousAniListCount, sourceEntryCount);
+  if (anilistResult.media.size < minimumPreservedCount) {
+    throw new Error(
+      `AniList enrichment would regress from ${previousAniListCount} previously preserved record(s) to ${anilistResult.media.size}; refusing to publish a degraded snapshot.`,
+    );
+  }
 }
 
 async function fetchAniListBatch(endpoint, ids, accessToken, retryLimit) {
@@ -1891,7 +2037,12 @@ async function fetchAniListBatch(endpoint, ids, accessToken, retryLimit) {
     label: "AniList GraphQL",
   });
   if (payload.errors?.length) {
-    throw new Error(payload.errors.map((item) => item.message ?? "Unknown AniList error").join("; "));
+    const message = payload.errors.map((item) => item.message ?? "Unknown AniList error").join("; ");
+    const graphQlStatus = Number(payload.errors.find((item) => Number.isInteger(item?.status))?.status);
+    if (graphQlStatus === 403) {
+      throw new HttpRequestError(message, { url: endpoint, status: 403, retryable: false });
+    }
+    throw new Error(message);
   }
   return Array.isArray(payload.data?.Page?.media) ? payload.data.Page.media : [];
 }
