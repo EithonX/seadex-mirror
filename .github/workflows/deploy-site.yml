@@ -149,6 +149,7 @@ jobs:
           command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=main --commit-dirty=true
 
       - name: Verify exact Pages deployment
+        id: verify-pages-deployment
         if: steps.cloudflare-change.outputs.deploy == 'true'
         env:
           DEPLOYED_SITE_URL: ${{ steps.deploy-pages.outputs.deployment-url }}
@@ -158,6 +159,7 @@ jobs:
         run: npm run verify:deployed-site
 
       - name: Verify production alias
+        id: verify-cloudflare-primary
         if: steps.cloudflare-change.outputs.deploy == 'true'
         env:
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
@@ -182,6 +184,7 @@ jobs:
           npm exec --yes --package="surge@${SURGE_CLI_VERSION}" -- surge ./dist "https://${SURGE_DOMAIN}" --message "snapshot ${SNAPSHOT_ID}" 2>&1 | node scripts/redact-surge-output.mjs
 
       - name: Verify Surge mirror
+        id: verify-surge-backup
         if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && steps.surge-change.outputs.deploy == 'true' && steps.deploy-surge.outcome == 'success' }}
         env:
           DEPLOYED_SITE_URL: ${{ format('https://{0}', env.SURGE_DOMAIN) }}
@@ -189,3 +192,30 @@ jobs:
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
           EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
         run: npm run verify:deployed-site
+
+      - name: Ensure Surge stable deployment
+        if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && (steps.surge-change.outputs.deploy != 'true' || (steps.deploy-surge.outcome == 'success' && steps.verify-surge-backup.outcome == 'success')) }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/register-github-deployment.mjs
+          --environment "Surge Backup"
+          --url "https://${SURGE_DOMAIN}"
+          --description "Verified Surge backup mirror"
+          --snapshot "${{ steps.snapshot.outputs.snapshot-id }}"
+          --fingerprint "${{ steps.snapshot.outputs.site-fingerprint }}"
+
+      - name: Ensure Cloudflare stable deployment
+        if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && (steps.cloudflare-change.outputs.deploy != 'true' || (steps.deploy-pages.outcome == 'success' && steps.verify-pages-deployment.outcome == 'success' && steps.verify-cloudflare-primary.outcome == 'success')) }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STABLE_DEPLOYMENT_URL: ${{ format('https://{0}.pages.dev', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
+        run: >-
+          node scripts/register-github-deployment.mjs
+          --environment "Cloudflare Primary"
+          --url "$STABLE_DEPLOYMENT_URL"
+          --description "Verified Cloudflare primary mirror"
+          --snapshot "${{ steps.snapshot.outputs.snapshot-id }}"
+          --fingerprint "${{ steps.snapshot.outputs.site-fingerprint }}"

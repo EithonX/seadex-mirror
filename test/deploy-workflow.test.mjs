@@ -45,3 +45,36 @@ test("test-only and rebuild-workflow-only changes do not trigger a site deployme
   assert.doesNotMatch(deployWorkflow, /- "test\/\*\*"/u);
   assert.doesNotMatch(deployWorkflow, /- "\.github\/workflows\/rebuild-mirror\.yml"/u);
 });
+
+
+test("workflows preserve Cloudflare immutable deployment history and add stable provider deployments", () => {
+  for (const workflow of [deployWorkflow, rebuildWorkflow]) {
+    assert.match(workflow, /gitHubToken: \$\{\{ github\.token \}\}/u);
+    assert.match(workflow, /- name: Ensure Surge stable deployment/u);
+    assert.match(workflow, /--environment "Surge Backup"/u);
+    assert.match(workflow, /--url "https:\/\/\$\{SURGE_DOMAIN\}"/u);
+    assert.match(workflow, /- name: Ensure Cloudflare stable deployment/u);
+    assert.match(workflow, /--environment "Cloudflare Primary"/u);
+    assert.match(workflow, /STABLE_DEPLOYMENT_URL: \$\{\{ format\('https:\/\/\{0\}\.pages\.dev'/u);
+    assert.match(workflow, /--snapshot "\$\{\{ steps\.snapshot\.outputs\.snapshot-id \}\}"/u);
+    assert.match(workflow, /--fingerprint "\$\{\{ steps\.snapshot\.outputs\.site-fingerprint \}\}"/u);
+    assert.match(workflow, /deployments: write/u);
+  }
+});
+
+test("stable deployment records seed on verified no-op output, remain idempotent, and Cloudflare is ensured last", () => {
+  for (const workflow of [deployWorkflow, rebuildWorkflow]) {
+    assert.match(
+      workflow,
+      /Ensure Surge stable deployment\n\s+if: \$\{\{ always\(\) && steps\.publish-ready\.outputs\.ready == 'true' && \(steps\.surge-change\.outputs\.deploy != 'true' \|\| \(steps\.deploy-surge\.outcome == 'success' && steps\.verify-surge-backup\.outcome == 'success'\)\) \}\}/u,
+    );
+    assert.match(
+      workflow,
+      /Ensure Cloudflare stable deployment\n\s+if: \$\{\{ always\(\) && steps\.publish-ready\.outputs\.ready == 'true' && \(steps\.cloudflare-change\.outputs\.deploy != 'true' \|\| \(steps\.deploy-pages\.outcome == 'success' && steps\.verify-pages-deployment\.outcome == 'success' && steps\.verify-cloudflare-primary\.outcome == 'success'\)\) \}\}/u,
+    );
+    assert.ok(
+      workflow.indexOf("Ensure Surge stable deployment") < workflow.indexOf("Ensure Cloudflare stable deployment"),
+      "Cloudflare stable deployment should be ensured last so the primary stable URL is the newest custom deployment record",
+    );
+  }
+});
