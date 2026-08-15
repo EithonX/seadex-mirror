@@ -69,9 +69,11 @@ async function buildWorkbookBuffer() {
 }
 
 async function startFixtureServer() {
-  const entries = [entry(1, "torrent-1"), entry(2, "torrent-2")];
   const workbookBuffer = await buildWorkbookBuffer();
-  const state = { aniListForbidden: false };
+  const state = {
+    aniListForbidden: false,
+    entries: [entry(1, "torrent-1"), entry(2, "torrent-2")],
+  };
   const counters = {
     listIds: 0,
     entryRevision: 0,
@@ -79,9 +81,6 @@ async function startFixtureServer() {
     fullEntryPages: 0,
     workbook: 0,
     aniList: 0,
-    legacyManifest: 0,
-    legacyStatus: 0,
-    legacyCache: 0,
   };
 
   const server = createServer(async (request, response) => {
@@ -91,7 +90,7 @@ async function startFixtureServer() {
     if (url.pathname === "/api/listIDs") {
       counters.listIds += 1;
       response.writeHead(200, { "content-type": "text/plain" });
-      response.end("1,2");
+      response.end(state.entries.map((item) => item.alID).join(","));
       return;
     }
 
@@ -101,9 +100,9 @@ async function startFixtureServer() {
         writeJson(response, {
           page: 1,
           perPage: 1,
-          totalItems: 2,
-          totalPages: 2,
-          items: [{ id: "entry-2", updated: FIXED_TIME }],
+          totalItems: state.entries.length,
+          totalPages: state.entries.length,
+          items: [{ id: state.entries.at(-1).id, updated: state.entries.at(-1).updated }],
         });
         return;
       }
@@ -112,9 +111,9 @@ async function startFixtureServer() {
       writeJson(response, {
         page: 1,
         perPage: Number(url.searchParams.get("perPage") ?? 500),
-        totalItems: entries.length,
+        totalItems: state.entries.length,
         totalPages: 1,
-        items: entries,
+        items: state.entries,
       });
       return;
     }
@@ -124,9 +123,9 @@ async function startFixtureServer() {
       writeJson(response, {
         page: 1,
         perPage: 1,
-        totalItems: 2,
-        totalPages: 2,
-        items: [{ id: "torrent-2", updated: FIXED_TIME }],
+        totalItems: state.entries.length,
+        totalPages: state.entries.length,
+        items: [{ id: state.entries.at(-1).trs[0], updated: state.entries.at(-1).expand.trs[0].updated }],
       });
       return;
     }
@@ -138,28 +137,6 @@ async function startFixtureServer() {
         "content-length": String(workbookBuffer.length),
       });
       response.end(workbookBuffer);
-      return;
-    }
-
-    if (url.pathname === "/legacy/manifest.json") {
-      counters.legacyManifest += 1;
-      response.writeHead(200, { "content-type": "text/html" });
-      response.end("<!doctype html><title>legacy site</title>");
-      return;
-    }
-
-    if (url.pathname === "/legacy/status.json") {
-      counters.legacyStatus += 1;
-      writeJson(response, {
-        counts: { entries: 2, torrents: 2, anilistMedia: 2 },
-        sync: { lastRebuildStartedAt: FIXED_TIME, lastRebuildFinishedAt: FIXED_TIME },
-      });
-      return;
-    }
-
-    if (url.pathname === "/legacy/anilist-cache.json") {
-      counters.legacyCache += 1;
-      writeJson(response, { generatedAt: FIXED_TIME, items: [aniListMedia(1), aniListMedia(2)] });
       return;
     }
 
@@ -204,6 +181,9 @@ async function startFixtureServer() {
     },
     setAniListForbidden(value) {
       state.aniListForbidden = Boolean(value);
+    },
+    addEntry(alID) {
+      state.entries.push(entry(alID, `torrent-${alID}`));
     },
     close() {
       return new Promise((resolvePromise, rejectPromise) => {
@@ -289,57 +269,6 @@ test("unchanged build confirms lightweight guards and skips the full SeaDex craw
 });
 
 
-test("legacy remote cache bootstraps CI when manifest is unavailable and AniList returns 403", async (t) => {
-  const fixture = await startFixtureServer();
-  const outputDir = await mkdtemp(join(tmpdir(), "seadex-legacy-bootstrap-"));
-  fixture.setAniListForbidden(true);
-  t.after(async () => {
-    await fixture.close();
-    await rm(outputDir, { recursive: true, force: true });
-  });
-
-  const result = await runBuilder([
-    `--source=${fixture.baseUrl}`,
-    `--anilist=${fixture.baseUrl}/graphql`,
-    `--sheetWorkbookUrl=${fixture.baseUrl}/sheet.xlsx`,
-    `--statusUrl=${fixture.baseUrl}/legacy/status.json`,
-    `--out=${outputDir}`,
-    "--batchSize=1",
-    "--delayMs=0",
-    "--retryLimit=0",
-    "--sourceCaptureAttempts=2",
-    "--onUnchanged=materialize",
-  ]);
-
-  assert.match(result.stderr, /validated legacy remote AniList cache/u);
-  assert.match(result.stderr, /AniList returned HTTP 403; stopping 1 remaining batch request/u);
-  assert.match(result.stdout, /"action": "rebuilt"/u);
-  assert.match(result.stdout, /"staleFallback": 2/u);
-  assert.match(result.stdout, /"unresolved": 0/u);
-  assert.equal(fixture.counters.legacyManifest, 1);
-  assert.equal(fixture.counters.legacyStatus, 1);
-  assert.equal(fixture.counters.legacyCache, 1);
-  assert.ok(fixture.counters.fullEntryPages > 0, "legacy cache bootstrap must never enable fast skip");
-  assert.equal(fixture.counters.aniList, 1, "terminal 403 must stop further AniList batch requests");
-
-  fixture.resetCounters();
-  const second = await runBuilder([
-    `--source=${fixture.baseUrl}`,
-    `--anilist=${fixture.baseUrl}/graphql`,
-    `--sheetWorkbookUrl=${fixture.baseUrl}/sheet.xlsx`,
-    `--out=${outputDir}`,
-    "--batchSize=1",
-    "--delayMs=0",
-    "--retryLimit=0",
-    "--sourceCaptureAttempts=2",
-  ]);
-  assert.match(second.stdout, /skipping the full SeaDex record crawl/u);
-  assert.match(second.stdout, /"action": "skipped"/u);
-  assert.match(second.stdout, /"aniListCacheRefreshDue": true/u);
-  assert.equal(fixture.counters.fullEntryPages, 0, "stale enrichment alone must not force a SeaDex crawl");
-  assert.equal(fixture.counters.aniList, 0, "stale enrichment must not contact AniList on an unchanged source skip");
-});
-
 test("fresh build fails closed when AniList is unavailable and no previous cache exists", async (t) => {
   const fixture = await startFixtureServer();
   const outputDir = await mkdtemp(join(tmpdir(), "seadex-no-cache-anilist-failure-"));
@@ -360,7 +289,40 @@ test("fresh build fails closed when AniList is unavailable and no previous cache
       "--retryLimit=0",
       "--sourceCaptureAttempts=2",
     ]),
-    /refusing to publish a degraded snapshot/u,
+    /refusing to publish an incomplete snapshot/u,
   );
   assert.equal(fixture.counters.aniList, 1, "terminal 403 must stop after the first AniList request");
+});
+
+
+test("source growth fails closed when AniList cannot resolve the newly added entry", async (t) => {
+  const fixture = await startFixtureServer();
+  const outputDir = await mkdtemp(join(tmpdir(), "seadex-new-entry-anilist-failure-"));
+  t.after(async () => {
+    await fixture.close();
+    await rm(outputDir, { recursive: true, force: true });
+  });
+
+  const commonArgs = [
+    `--source=${fixture.baseUrl}`,
+    `--anilist=${fixture.baseUrl}/graphql`,
+    `--sheetWorkbookUrl=${fixture.baseUrl}/sheet.xlsx`,
+    `--out=${outputDir}`,
+    "--batchSize=1",
+    "--delayMs=0",
+    "--retryLimit=0",
+    "--sourceCaptureAttempts=2",
+  ];
+
+  await runBuilder(commonArgs);
+  fixture.addEntry(3);
+  fixture.setAniListForbidden(true);
+  fixture.resetCounters();
+
+  await assert.rejects(
+    runBuilder(commonArgs),
+    /resolved 2\/3 active entry record\(s\).*refusing to publish an incomplete snapshot/u,
+  );
+  assert.ok(fixture.counters.fullEntryPages > 0, "a changed source must still perform the full SeaDex crawl");
+  assert.equal(fixture.counters.aniList, 1, "terminal AniList 403 must stop after the first unresolved batch");
 });

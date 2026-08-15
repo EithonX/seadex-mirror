@@ -61,6 +61,7 @@ AniList authentication is optional. Without a token, the builder uses the public
 | `npm run verify:frontend-build` | Verify the production frontend output |
 | `npm run verify:pages-limits` | Check the build against Cloudflare Pages limits |
 | `npm run deploy` | Build and deploy with Wrangler |
+| `npm run deploy:bootstrap` | Publish the existing verified local snapshot without refetching upstream data |
 
 ## Data pipeline
 
@@ -109,7 +110,9 @@ Deployment uses Cloudflare Pages Direct Upload through GitHub Actions.
 
 [`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) checks for upstream changes every 12 hours and publishes a new verified snapshot when needed.
 
-[`deploy-site.yml`](.github/workflows/deploy-site.yml) handles code-driven deployments from `main`.
+[`deploy-site.yml`](.github/workflows/deploy-site.yml) handles code-driven deployments from `main`. It restores the currently verified production snapshot before rebuilding the frontend, so code-only deploys do not need to refetch SeaDex or AniList.
+
+For a new or intentionally reset Pages deployment, generate and verify a snapshot locally, authenticate Wrangler with `npx wrangler login`, then run `npm run deploy:bootstrap`. This seeds production with the current manifest-backed format; CI does not include compatibility code for older snapshot schemas.
 
 GitHub Actions are pinned to immutable commit SHAs. Cloudflare and AniList credentials are exposed only to the steps that require them.
 

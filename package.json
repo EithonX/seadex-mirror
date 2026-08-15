@@ -11,6 +11,7 @@
     "dev": "vite",
     "dev:pages": "wrangler pages dev dist",
     "deploy": "npm run build:site && wrangler pages deploy dist --project-name seadex",
+    "deploy:bootstrap": "node scripts/bootstrap-pages.mjs",
     "deploy:full": "npm run data:build -- --force=true --onUnchanged=materialize && npm run build:frontend && wrangler pages deploy dist --project-name seadex",
     "typecheck": "tsc -p tsconfig.frontend.json --noEmit",
     "verify:deployed-site": "node scripts/verify-deployed-site.mjs",

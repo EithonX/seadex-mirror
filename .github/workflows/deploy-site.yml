@@ -57,6 +57,11 @@ jobs:
       - name: Verify source and regression tests
         run: npm run verify
 
+      - name: Restore verified production snapshot
+        env:
+          MIRROR_BASE_URL: ${{ format('https://{0}.pages.dev', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
+        run: npm run data:sync-live
+
       - name: Build static mirror data
         env:
           ANILIST_ACCESS_TOKEN: ${{ secrets.ANILIST_ACCESS_TOKEN }}

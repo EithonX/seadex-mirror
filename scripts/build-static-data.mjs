@@ -570,70 +570,8 @@ async function loadRemoteStatus(statusUrl, retryLimit) {
     };
   } catch (error) {
     console.warn(`${PROGRESS_PREFIX} Could not reuse the verified remote snapshot cache: ${errorMessage(error)}`);
-  }
-
-  // Pre-manifest deployments are a one-time migration case. They cannot be
-  // trusted for change detection, but their AniList cache is still valuable
-  // enrichment data when a fresh CI runner cannot reach AniList. This fallback
-  // validates the legacy status/cache pair and is never eligible for fast skip.
-  try {
-    const legacySnapshot = await loadLegacyRemoteAniListCache(statusUrl, retryLimit);
-    console.warn(
-      `${PROGRESS_PREFIX} Reusing a validated legacy remote AniList cache for bootstrap only; a full SeaDex capture is still required.`,
-    );
-    return legacySnapshot;
-  } catch (error) {
-    console.warn(`${PROGRESS_PREFIX} Could not reuse the legacy remote AniList cache: ${errorMessage(error)}`);
     return null;
   }
-}
-
-async function loadLegacyRemoteAniListCache(statusUrl, retryLimit) {
-  const cacheUrl = new URL("anilist-cache.json", statusUrl).toString();
-  const [statusResponse, cacheResponse] = await Promise.all([
-    fetchWithRetry(
-      statusUrl,
-      { headers: { accept: "application/json", "cache-control": "no-cache" } },
-      { retries: retryLimit, label: "Legacy remote snapshot status" },
-    ),
-    fetchWithRetry(
-      cacheUrl,
-      { headers: { accept: "application/json", "cache-control": "no-cache" } },
-      { retries: retryLimit, label: "Legacy remote AniList cache" },
-    ),
-  ]);
-  const [status, cachePayload] = await Promise.all([
-    readJsonResponse(statusResponse, {
-      maxBytes: 2 * 1024 * 1024,
-      label: "Legacy remote snapshot status",
-    }),
-    readJsonResponse(cacheResponse, {
-      maxBytes: 32 * 1024 * 1024,
-      label: "Legacy remote AniList cache",
-    }),
-  ]);
-
-  const entries = Number(status?.counts?.entries);
-  const torrents = Number(status?.counts?.torrents);
-  const aniListMedia = Number(status?.counts?.anilistMedia);
-  if (!Number.isInteger(entries) || entries <= 0) {
-    throw new Error("Legacy remote status has no valid positive entry count.");
-  }
-  if (!Number.isInteger(torrents) || torrents < 0) {
-    throw new Error("Legacy remote status has no valid torrent count.");
-  }
-  if (!Number.isInteger(aniListMedia) || aniListMedia <= 0 || aniListMedia > entries) {
-    throw new Error("Legacy remote status has no valid AniList media count.");
-  }
-
-  const aniListCache = buildAniListCacheMap(cachePayload);
-  validateRemoteAniListCacheCount(status, aniListCache);
-
-  return {
-    origin: "remote-legacy-cache",
-    status,
-    aniListCache,
-  };
 }
 
 function validateRemoteAniListCacheCount(status, aniListCache) {
@@ -671,21 +609,26 @@ async function fetchManifestedRemoteFile(url, manifest, path, maxBytes, retryLim
 }
 
 function buildAniListCacheMap(payload) {
+  if (Number(payload?.schemaVersion) !== 2 || !Array.isArray(payload?.items)) {
+    throw new Error("AniList cache must use schema version 2 with an items array.");
+  }
+
   const cache = new Map();
-
-  for (const item of Array.isArray(payload?.items) ? payload.items : []) {
-    const isVersionedRecord = item?.media && typeof item.media === "object";
-    const media = isVersionedRecord ? item.media : item;
-    const id = Number(media?.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      continue;
+  for (const item of payload.items) {
+    if (!item?.media || typeof item.media !== "object" || Array.isArray(item.media)) {
+      throw new Error("AniList cache contains a record without a media object.");
     }
-
-    // Legacy cache rows had no per-record freshness metadata. Deliberately mark them
-    // stale so the first build after this migration attempts one real refresh. If
-    // AniList is unavailable, fetchAniListSnapshot still retains the legacy media.
-    const fetchedAt = isVersionedRecord && isValidDateString(item?.fetchedAt) ? item.fetchedAt : null;
-    cache.set(id, { media, fetchedAt });
+    const id = Number(item.media.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("AniList cache contains a record without a valid positive media ID.");
+    }
+    if (cache.has(id)) {
+      throw new Error(`AniList cache contains duplicate media ID ${id}.`);
+    }
+    if (!isValidDateString(item.fetchedAt)) {
+      throw new Error(`AniList cache media ID ${id} has an invalid fetchedAt timestamp.`);
+    }
+    cache.set(id, { media: item.media, fetchedAt: item.fetchedAt });
   }
 
   return cache;
@@ -699,10 +642,6 @@ function validateSnapshotSourceRevisionForReuse(status) {
 }
 
 function getStoredSourceRevision(existingSnapshot) {
-  if (existingSnapshot?.origin === "remote-legacy-cache") {
-    return null;
-  }
-
   const sourceFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint;
   const snapshotId = existingSnapshot?.status?.snapshot?.id;
   if (!/^[a-f0-9]{64}$/u.test(String(sourceFingerprint ?? ""))) {
@@ -1991,20 +1930,14 @@ function assertAniListEnrichmentSafe({ anilistResult, existingSnapshot, sourceEn
     return;
   }
 
-  const previousAniListCount = Number(existingSnapshot?.status?.counts?.anilistMedia);
-  const hasUsablePreviousCount = Number.isInteger(previousAniListCount) && previousAniListCount > 0;
-
-  if (!hasUsablePreviousCount) {
-    if (anilistResult.stats.unresolved > 0) {
-      throw new Error(
-        `AniList enrichment has ${anilistResult.stats.unresolved} unresolved record(s) and no complete previous cache is available; refusing to publish a degraded snapshot.`,
-      );
-    }
-    return;
+  if (anilistResult.stats.unresolved > 0 || anilistResult.media.size !== sourceEntryCount) {
+    throw new Error(
+      `AniList enrichment resolved ${anilistResult.media.size}/${sourceEntryCount} active entry record(s) with ${anilistResult.stats.unresolved} unresolved; refusing to publish an incomplete snapshot.`,
+    );
   }
 
-  const minimumPreservedCount = Math.min(previousAniListCount, sourceEntryCount);
-  if (anilistResult.media.size < minimumPreservedCount) {
+  const previousAniListCount = Number(existingSnapshot?.status?.counts?.anilistMedia);
+  if (Number.isInteger(previousAniListCount) && previousAniListCount > anilistResult.media.size) {
     throw new Error(
       `AniList enrichment would regress from ${previousAniListCount} previously preserved record(s) to ${anilistResult.media.size}; refusing to publish a degraded snapshot.`,
     );

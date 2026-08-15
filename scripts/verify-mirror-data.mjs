@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inspectEntryTorrentIds } from "./lib/mirror-entry-integrity.mjs";
 import {
   readSnapshotManifest,
   validateSourceRevision,
@@ -122,22 +123,25 @@ function validateSheetWorkbook(value) {
 }
 
 function validateAniListCache(value, status, catalog) {
-  if (!isRecord(value) || !Array.isArray(value.items)) {
-    fail("anilist-cache.json must contain an items array.");
+  if (!isRecord(value) || value.schemaVersion !== 2 || !Array.isArray(value.items)) {
+    fail("anilist-cache.json must use schemaVersion 2 and contain an items array.");
     return;
   }
   const ids = new Set();
   const catalogIds = new Set((catalog?.items ?? []).map((item) => item.alId));
   for (const item of value.items) {
-    const media = isRecord(item?.media) ? item.media : item;
-    const id = media?.id;
+    if (!isRecord(item) || !isRecord(item.media)) {
+      fail("anilist-cache.json contains a record without a media object.");
+      continue;
+    }
+    const id = item.media.id;
     if (!isPositiveInteger(id)) {
       fail("anilist-cache.json contains a record without a valid media ID.");
       continue;
     }
     if (ids.has(id)) fail(`anilist-cache.json contains duplicate media ID ${id}.`);
     ids.add(id);
-    if (isRecord(item?.media) && !Number.isFinite(Date.parse(item.fetchedAt ?? ""))) {
+    if (!Number.isFinite(Date.parse(item.fetchedAt ?? ""))) {
       fail(`anilist-cache.json media ID ${id} has an invalid fetchedAt timestamp.`);
     }
     if (!catalogIds.has(id)) {
@@ -183,7 +187,6 @@ async function validateEntries(status, catalog, sheet) {
 
   const catalogById = new Map((catalog?.items ?? []).map((item) => [item.alId, item]));
   const sheetIds = new Set((sheet?.items ?? []).map((item) => item.alId));
-  const seenTorrentIds = new Map();
   let torrentCount = 0;
   let bestTorrentCount = 0;
   let entriesWithoutTorrents = 0;
@@ -216,16 +219,12 @@ async function validateEntries(status, catalog, sheet) {
     if (value.torrents.length === 0) entriesWithoutTorrents += 1;
     torrentCount += value.torrents.length;
     bestTorrentCount += best;
-    for (const torrent of value.torrents) {
-      if (!isNonEmptyString(torrent?.id)) {
-        fail(`${file} contains a torrent without an ID.`);
-        continue;
-      }
-      const previous = seenTorrentIds.get(torrent.id);
-      if (previous !== undefined) {
-        fail(`Torrent ${torrent.id} is duplicated${previous === alId ? ` within entry ${alId}` : ` across entries ${previous} and ${alId}`}.`);
-      }
-      seenTorrentIds.set(torrent.id, alId);
+    const torrentIdInspection = inspectEntryTorrentIds(value.torrents);
+    for (const index of torrentIdInspection.missingIndexes) {
+      fail(`${file} contains a torrent without an ID at index ${index}.`);
+    }
+    for (const torrentId of torrentIdInspection.duplicates) {
+      fail(`Torrent ${torrentId} is duplicated within entry ${alId}.`);
     }
   }
 
