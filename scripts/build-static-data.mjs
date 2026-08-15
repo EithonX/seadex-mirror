@@ -3,16 +3,23 @@ import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
 import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer, readTextResponse } from "./lib/http.mjs";
-import { fetchConsistentSeaDexSnapshot } from "./lib/seadex-source.mjs";
+import {
+  fetchConsistentSeaDexSnapshot,
+  fetchSeaDexMutationGuard,
+  isSeaDexMutationGuardInternallyConsistent,
+} from "./lib/seadex-source.mjs";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   buildSnapshotId,
   buildSourceFingerprint,
+  buildSourceRevision,
   buildWorkbookContentFingerprint,
   createSnapshotManifest,
   readSnapshotManifest,
   sha256Buffer,
+  sourceRevisionMatches,
   validateSnapshotManifest,
+  validateSourceRevision,
   verifySnapshotManifest,
 } from "./lib/snapshot-integrity.mjs";
 
@@ -137,26 +144,78 @@ async function main() {
   const remoteSnapshot = localSnapshot ? null : await loadRemoteStatus(statusUrl, retryLimit);
   const existingSnapshot = localSnapshot ?? remoteSnapshot;
 
+  const storedSourceRevision = getStoredSourceRevision(existingSnapshot);
+  const needsLocalMaterialization = onUnchanged === "materialize" && !localSnapshot;
+  const canFastSkip =
+    !force &&
+    Boolean(existingSnapshot) &&
+    Boolean(storedSourceRevision) &&
+    !needsLocalMaterialization;
+
+  let sourceSnapshot = null;
+  let sheetSnapshot = null;
+  let seededSourceGuard = null;
+
+  if (canFastSkip) {
+    const preflight = await checkLightweightSources({
+      sourceBaseUrl,
+      sheetWorkbookUrl,
+      retryLimit,
+      existingSnapshot,
+      storedSourceRevision,
+      anilistCacheTtlHours,
+      refreshAniList,
+    });
+    sheetSnapshot = preflight.sheetSnapshot;
+    seededSourceGuard = preflight.initialGuard;
+
+    if (preflight.unchanged) {
+      logStep("Authoritative source guards are unchanged; skipping the full SeaDex record crawl.");
+      const report = buildSkippedReport({
+        existingSnapshot,
+        localSnapshot,
+        sourceBaseUrl,
+        startedAt,
+        onUnchanged,
+        sourceCheck: "confirmed-lightweight-guard",
+      });
+      await writeOptionalReport(reportPath, report);
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+  } else if (!force && existingSnapshot && !storedSourceRevision) {
+    logStep("The previous snapshot has no compatible source guard metadata; one full capture will migrate it.");
+  }
+
   logStep(`Capturing a consistent SeaDex snapshot (up to ${sourceCaptureAttempts} attempt(s))...`);
-  const sourceSnapshot = await fetchConsistentSeaDexSnapshot({
+  sourceSnapshot = await fetchConsistentSeaDexSnapshot({
     sourceBaseUrl,
     pageSize,
     maxAttempts: sourceCaptureAttempts,
     retryLimit,
     maxResponseBytes: MAX_SOURCE_JSON_BYTES,
+    initialGuard: seededSourceGuard,
     log: logStep,
   });
   logStep(
     `Consistent SeaDex snapshot confirmed: ${sourceSnapshot.entries.length} entries on capture attempt ${sourceSnapshot.captureAttempt}, fingerprint ${sourceSnapshot.seaDexFingerprint.slice(0, 12)}.`,
   );
 
-  logStep("Fetching published SeaDex sheet workbook...");
-  const sheetSnapshot = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit);
-  logStep(
-    `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), content fingerprint ${sheetSnapshot.contentSha256.slice(0, 12)}.`,
-  );
+  if (!sheetSnapshot) {
+    logStep("Fetching published SeaDex sheet workbook...");
+    sheetSnapshot = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit);
+    logStep(
+      `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), content fingerprint ${sheetSnapshot.contentSha256.slice(0, 12)}.`,
+    );
+  }
 
+  const sourceRevision = buildSourceRevision({
+    sourceBaseUrl,
+    seaDexGuard: sourceSnapshot.sourceGuard,
+    workbookContentSha256: sheetSnapshot.contentSha256,
+  });
   const sourceFingerprint = buildSourceFingerprint({
+    sourceBaseUrl,
     seaDexFingerprint: sourceSnapshot.seaDexFingerprint,
     workbookContentSha256: sheetSnapshot.contentSha256,
   });
@@ -167,27 +226,22 @@ async function main() {
     refreshAniList,
   );
   const upstreamUnchanged =
-    !force && shouldSkipRebuild(existingSnapshot, sourceFingerprint) && !aniListRefreshDue;
+    !force &&
+    shouldSkipRebuild(existingSnapshot, sourceFingerprint) &&
+    sourceRevisionMatches(storedSourceRevision, sourceRevision) &&
+    !aniListRefreshDue;
   const shouldMaterializeSnapshot = upstreamUnchanged && onUnchanged === "materialize" && !localSnapshot;
 
   if (upstreamUnchanged && !shouldMaterializeSnapshot) {
-    const report = {
-      action: "skipped",
-      mode: "static-snapshot",
-      skipped: true,
-      reason: "authoritative-source-unchanged",
+    const report = buildSkippedReport({
+      existingSnapshot,
+      localSnapshot,
       sourceBaseUrl,
       startedAt,
-      finishedAt: new Date().toISOString(),
-      sourceFingerprint,
-      snapshotId: existingSnapshot?.status?.snapshot?.id ?? null,
-      snapshotSource: existingSnapshot?.origin ?? null,
-      localSnapshotReady: Boolean(localSnapshot),
       onUnchanged,
-      entries: existingSnapshot?.status?.counts?.entries ?? null,
-      torrents: existingSnapshot?.status?.counts?.torrents ?? null,
-      aniListCacheRefreshDue: false,
-    };
+      sourceCheck: "full-capture",
+      sourceFingerprint,
+    });
     await writeOptionalReport(reportPath, report);
     console.log(JSON.stringify(report, null, 2));
     return;
@@ -241,6 +295,7 @@ async function main() {
     anilistStats: anilistResult.stats,
     sheetWorkbook: sheetSnapshot.payload,
     sourceFingerprint,
+    sourceRevision,
     snapshotId,
   });
 
@@ -275,6 +330,111 @@ async function main() {
   await writeOptionalReport(reportPath, report);
   console.log(JSON.stringify(report, null, 2));
 }
+async function checkLightweightSources(options) {
+  const {
+    sourceBaseUrl,
+    sheetWorkbookUrl,
+    retryLimit,
+    existingSnapshot,
+    storedSourceRevision,
+    anilistCacheTtlHours,
+    refreshAniList,
+  } = options;
+
+  logStep("Checking lightweight source guards before a full SeaDex capture...");
+  logStep("Fetching published SeaDex sheet workbook...");
+  const [firstGuard, sheetSnapshot] = await Promise.all([
+    fetchSeaDexMutationGuard({ sourceBaseUrl, retryLimit }),
+    fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit),
+  ]);
+  logStep(
+    `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), content fingerprint ${sheetSnapshot.contentSha256.slice(0, 12)}.`,
+  );
+
+  if (!isSeaDexMutationGuardInternallyConsistent(firstGuard)) {
+    logStep("SeaDex returned an internally inconsistent lightweight guard; falling back to a full capture.");
+    return { unchanged: false, sheetSnapshot, initialGuard: null };
+  }
+
+  const candidateRevision = buildSourceRevision({
+    sourceBaseUrl,
+    seaDexGuard: firstGuard,
+    workbookContentSha256: sheetSnapshot.contentSha256,
+  });
+  const aniListRefreshDue = hasAniListRefreshDue(
+    existingSnapshot?.aniListCache ?? new Map(),
+    firstGuard.listIds,
+    anilistCacheTtlHours,
+    refreshAniList,
+  );
+
+  if (!sourceRevisionMatches(storedSourceRevision, candidateRevision)) {
+    logStep("Authoritative source guards changed; a full SeaDex capture is required.");
+    return { unchanged: false, sheetSnapshot, initialGuard: firstGuard };
+  }
+  if (aniListRefreshDue) {
+    logStep("AniList cache refresh is due; a full SeaDex capture is required before rebuilding.");
+    return { unchanged: false, sheetSnapshot, initialGuard: firstGuard };
+  }
+
+  logStep("Source guards match the last verified snapshot; confirming once more before skipping.");
+  const confirmationGuard = await fetchSeaDexMutationGuard({ sourceBaseUrl, retryLimit });
+  if (
+    !isSeaDexMutationGuardInternallyConsistent(confirmationGuard) ||
+    confirmationGuard.fingerprint !== firstGuard.fingerprint
+  ) {
+    logStep("SeaDex changed while confirming the lightweight guard; a full capture is required.");
+    return {
+      unchanged: false,
+      sheetSnapshot,
+      initialGuard: isSeaDexMutationGuardInternallyConsistent(confirmationGuard) ? confirmationGuard : null,
+    };
+  }
+
+  const confirmedRevision = buildSourceRevision({
+    sourceBaseUrl,
+    seaDexGuard: confirmationGuard,
+    workbookContentSha256: sheetSnapshot.contentSha256,
+  });
+  if (!sourceRevisionMatches(storedSourceRevision, confirmedRevision)) {
+    logStep("Authoritative source guards changed during confirmation; a full capture is required.");
+    return { unchanged: false, sheetSnapshot, initialGuard: confirmationGuard };
+  }
+
+  return { unchanged: true, sheetSnapshot, initialGuard: confirmationGuard };
+}
+
+function buildSkippedReport(options) {
+  const {
+    existingSnapshot,
+    localSnapshot,
+    sourceBaseUrl,
+    startedAt,
+    onUnchanged,
+    sourceCheck,
+    sourceFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint ?? null,
+  } = options;
+
+  return {
+    action: "skipped",
+    mode: "static-snapshot",
+    skipped: true,
+    reason: "authoritative-source-unchanged",
+    sourceCheck,
+    sourceBaseUrl,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    sourceFingerprint,
+    snapshotId: existingSnapshot?.status?.snapshot?.id ?? null,
+    snapshotSource: existingSnapshot?.origin ?? null,
+    localSnapshotReady: Boolean(localSnapshot),
+    onUnchanged,
+    entries: existingSnapshot?.status?.counts?.entries ?? null,
+    torrents: existingSnapshot?.status?.counts?.torrents ?? null,
+    aniListCacheRefreshDue: false,
+  };
+}
+
 async function loadLocalSnapshot(outputDir) {
   try {
     const statusPath = join(outputDir, "status.json");
@@ -303,6 +463,7 @@ async function loadLocalSnapshot(outputDir) {
     ]);
 
     const status = JSON.parse(statusText);
+    validateSnapshotSourceRevisionForReuse(status);
     JSON.parse(catalogText);
     JSON.parse(sheetText);
     JSON.parse(workbookText);
@@ -321,11 +482,20 @@ async function loadLocalSnapshot(outputDir) {
       return null;
     }
 
-    if (await pathExists(join(outputDir, "manifest.json"))) {
+    const manifestPath = join(outputDir, "manifest.json");
+    const hasManifest = await pathExists(manifestPath);
+    const snapshotSchemaVersion = Number(status?.snapshot?.schemaVersion ?? 0);
+    if (Number.isInteger(snapshotSchemaVersion) && snapshotSchemaVersion >= 3 && !hasManifest) {
+      throw new Error("Local schema-v3 snapshot is missing manifest.json.");
+    }
+    if (hasManifest) {
       const manifest = await readSnapshotManifest(outputDir);
       const verification = await verifySnapshotManifest(outputDir, manifest);
       if (status?.snapshot?.id && verification.snapshotId !== status.snapshot.id) {
         throw new Error("Local snapshot manifest ID does not match status.json.");
+      }
+      if (status?.snapshot?.sourceFingerprint && verification.sourceFingerprint !== status.snapshot.sourceFingerprint) {
+        throw new Error("Local snapshot manifest source fingerprint does not match status.json.");
       }
     }
 
@@ -372,6 +542,7 @@ async function loadRemoteStatus(statusUrl, retryLimit) {
     ]);
     const status = JSON.parse(statusBytes.toString("utf8"));
     const cachePayload = JSON.parse(cacheBytes.toString("utf8"));
+    validateSnapshotSourceRevisionForReuse(status);
 
     if (status?.snapshot?.id !== manifest.snapshotId) {
       throw new Error("Remote status snapshot ID does not match manifest.json.");
@@ -434,6 +605,30 @@ function buildAniListCacheMap(payload) {
   }
 
   return cache;
+}
+
+function validateSnapshotSourceRevisionForReuse(status) {
+  const schemaVersion = Number(status?.snapshot?.schemaVersion ?? 0);
+  if (Number.isInteger(schemaVersion) && schemaVersion >= 3) {
+    validateSourceRevision(status?.snapshot?.sourceRevision);
+  }
+}
+
+function getStoredSourceRevision(existingSnapshot) {
+  const sourceFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint;
+  const snapshotId = existingSnapshot?.status?.snapshot?.id;
+  if (!/^[a-f0-9]{64}$/u.test(String(sourceFingerprint ?? ""))) {
+    return null;
+  }
+  if (!/^[a-f0-9]{64}$/u.test(String(snapshotId ?? ""))) {
+    return null;
+  }
+
+  try {
+    return validateSourceRevision(existingSnapshot?.status?.snapshot?.sourceRevision);
+  } catch {
+    return null;
+  }
 }
 
 function shouldSkipRebuild(existingSnapshot, nextSourceFingerprint) {
@@ -661,6 +856,7 @@ function buildStaticSnapshot(snapshot) {
         schemaVersion: SNAPSHOT_SCHEMA_VERSION,
         id: snapshot.snapshotId,
         sourceFingerprint: snapshot.sourceFingerprint,
+        sourceRevision: snapshot.sourceRevision,
         createdAt: snapshot.finishedAt,
         manifest: "manifest.json",
       },

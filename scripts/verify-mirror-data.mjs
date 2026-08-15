@@ -1,7 +1,11 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readSnapshotManifest, verifySnapshotManifest } from "./lib/snapshot-integrity.mjs";
+import {
+  readSnapshotManifest,
+  validateSourceRevision,
+  verifySnapshotManifest,
+} from "./lib/snapshot-integrity.mjs";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const mirrorDataDir = join(projectRoot, "frontend", "public", "mirror-data");
@@ -61,6 +65,13 @@ function validateStatus(value) {
   if (!/^[a-f0-9]{64}$/u.test(String(value.snapshot?.id ?? ""))) fail("status.snapshot.id must be SHA-256 hex.");
   if (!/^[a-f0-9]{64}$/u.test(String(value.snapshot?.sourceFingerprint ?? ""))) {
     fail("status.snapshot.sourceFingerprint must be SHA-256 hex.");
+  }
+  if (Number(value.snapshot?.schemaVersion) >= 3) {
+    try {
+      validateSourceRevision(value.snapshot?.sourceRevision);
+    } catch (error) {
+      fail(`status.snapshot.sourceRevision is invalid: ${formatError(error)}`);
+    }
   }
   if (!isRecord(value.counts) || !isPositiveInteger(value.counts.entries)) {
     fail("status.counts.entries must be a positive integer.");

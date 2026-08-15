@@ -7,9 +7,12 @@ import {
   buildSeaDexFingerprint,
   buildSnapshotId,
   buildSourceFingerprint,
+  buildSourceRevision,
   buildWorkbookContentFingerprint,
   createSnapshotManifest,
   sha256Text,
+  sourceRevisionMatches,
+  validateSourceRevision,
   verifySnapshotManifest,
 } from "../scripts/lib/snapshot-integrity.mjs";
 
@@ -53,13 +56,81 @@ test("source fingerprint tracks normalized workbook content", () => {
   const seaDexFingerprint = sha256Text("same-seadex");
   assert.notEqual(
     buildSourceFingerprint({
+      sourceBaseUrl: "https://releases.moe",
       seaDexFingerprint,
       workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "A" }] }),
     }),
     buildSourceFingerprint({
+      sourceBaseUrl: "https://releases.moe",
       seaDexFingerprint,
       workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "B" }] }),
     }),
+  );
+});
+
+test("source fingerprint includes the source origin that is rendered into entry links", () => {
+  const seaDexFingerprint = sha256Text("same-seadex");
+  const workbookContentSha256 = sha256Text("same-workbook");
+  const first = buildSourceFingerprint({
+    sourceBaseUrl: "https://releases.moe",
+    seaDexFingerprint,
+    workbookContentSha256,
+  });
+  const otherOrigin = buildSourceFingerprint({
+    sourceBaseUrl: "https://mirror.example",
+    seaDexFingerprint,
+    workbookContentSha256,
+  });
+  assert.notEqual(first, otherOrigin);
+});
+
+test("source revision captures lightweight SeaDex guards and workbook identity", () => {
+  const guard = {
+    listIds: [2, 1],
+    entries: { count: 2, latest: { id: "entry-2", updated: "2026-08-15T00:00:00Z" } },
+    torrents: { count: 3, latest: { id: "torrent-3", updated: "2026-08-15T00:01:00Z" } },
+    fingerprint: sha256Text("guard"),
+  };
+  const workbookContentSha256 = sha256Text("workbook");
+  const revision = buildSourceRevision({
+    sourceBaseUrl: "https://releases.moe/",
+    seaDexGuard: guard,
+    workbookContentSha256,
+  });
+
+  assert.equal(revision.sourceBaseUrl, "https://releases.moe");
+  assert.equal(revision.seaDex.listIdCount, 2);
+  assert.equal(revision.seaDex.entries.count, 2);
+  assert.equal(revision.seaDex.torrents.count, 3);
+  assert.equal(validateSourceRevision(revision).workbookContentSha256, workbookContentSha256);
+  assert.equal(sourceRevisionMatches(revision, revision), true);
+
+  const changedWorkbook = { ...revision, workbookContentSha256: sha256Text("changed") };
+  assert.equal(sourceRevisionMatches(revision, changedWorkbook), false);
+});
+
+test("source revision rejects internally inconsistent or malformed guards", () => {
+  const base = {
+    sourceBaseUrl: "https://releases.moe",
+    workbookContentSha256: sha256Text("workbook"),
+  };
+
+  assert.throws(
+    () => buildSourceRevision({
+      ...base,
+      seaDexGuard: {
+        listIds: [1, 2],
+        entries: { count: 1, latest: { id: "entry", updated: "2026-08-15T00:00:00Z" } },
+        torrents: { count: 0, latest: null },
+        fingerprint: sha256Text("guard"),
+      },
+    }),
+    /internally inconsistent/u,
+  );
+
+  assert.throws(
+    () => validateSourceRevision({ schemaVersion: 1, sourceBaseUrl: "javascript:alert(1)" }),
+    /unsupported protocol|missing SeaDex/u,
   );
 });
 

@@ -5,6 +5,8 @@ import {
   fetchSeaDexCollectionRevision,
   fetchSeaDexEntries,
   fetchSeaDexListIds,
+  fetchSeaDexMutationGuard,
+  isSeaDexMutationGuardInternallyConsistent,
   parseSeaDexListIds,
 } from "../scripts/lib/seadex-source.mjs";
 
@@ -188,6 +190,57 @@ test("SeaDex entry crawl rejects an incomplete paginated collection", async () =
     }),
     /reported 2 entries but 1 rows were received/,
   );
+});
+
+test("SeaDex mutation guard consistency requires listIDs and entry counts to agree", async () => {
+  const fetchImpl = createStableSourceFetch({ entries: [entry(1), entry(2)], torrentCount: 0 });
+  const guard = await fetchSeaDexMutationGuard({
+    sourceBaseUrl: "https://releases.moe",
+    retryLimit: 0,
+    fetchImpl,
+  });
+
+  assert.equal(isSeaDexMutationGuardInternallyConsistent(guard), true);
+  assert.equal(
+    isSeaDexMutationGuardInternallyConsistent({ ...guard, entries: { ...guard.entries, count: 1 } }),
+    false,
+  );
+});
+
+test("SeaDex consistent capture can reuse a preflight guard without weakening the post-crawl check", async () => {
+  const rows = [entry(1, ["a"]), entry(2, ["b"])];
+  const baseFetch = createStableSourceFetch({ entries: rows, torrentCount: 2 });
+  let listIdCalls = 0;
+  let fullEntryPages = 0;
+  const fetchImpl = async (input, init) => {
+    const url = new URL(input);
+    if (url.pathname === "/api/listIDs") listIdCalls += 1;
+    if (url.pathname === "/api/collections/entries/records" && url.searchParams.get("perPage") !== "1") {
+      fullEntryPages += 1;
+    }
+    return baseFetch(input, init);
+  };
+
+  const initialGuard = await fetchSeaDexMutationGuard({
+    sourceBaseUrl: "https://releases.moe",
+    retryLimit: 0,
+    fetchImpl,
+  });
+  listIdCalls = 0;
+
+  const snapshot = await fetchConsistentSeaDexSnapshot({
+    sourceBaseUrl: "https://releases.moe",
+    pageSize: 500,
+    maxAttempts: 4,
+    retryLimit: 0,
+    fetchImpl,
+    initialGuard,
+  });
+
+  assert.equal(snapshot.captureAttempt, 1);
+  assert.equal(fullEntryPages, 1);
+  assert.equal(listIdCalls, 1, "only the mandatory post-crawl guard should be fetched");
+  assert.equal(snapshot.sourceGuard.fingerprint, initialGuard.fingerprint);
 });
 
 test("SeaDex consistent capture performs one full crawl when before/after guards match", async () => {

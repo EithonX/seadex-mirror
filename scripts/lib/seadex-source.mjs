@@ -17,18 +17,23 @@ export async function fetchConsistentSeaDexSnapshot(options) {
     maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
     fetchImpl = globalThis.fetch,
     log = () => {},
+    initialGuard = null,
   } = options;
 
   const attempts = parsePositiveInteger(maxAttempts, "maxAttempts");
   validatePageSize(pageSize);
+  let seededGuard = initialGuard;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     log(`SeaDex capture attempt ${attempt}/${attempts}...`);
 
-    const before = await fetchSeaDexMutationGuard({ sourceBaseUrl, retryLimit, fetchImpl });
-    if (!guardIsInternallyConsistent(before)) {
+    const before = seededGuard ?? await fetchSeaDexMutationGuard({ sourceBaseUrl, retryLimit, fetchImpl });
+    seededGuard = null;
+    if (!isSeaDexMutationGuardInternallyConsistent(before)) {
+      const listCount = Array.isArray(before?.listIds) ? before.listIds.length : "invalid";
+      const entryCount = Number.isSafeInteger(before?.entries?.count) ? before.entries.count : "invalid";
       log(
-        `SeaDex changed while reading the pre-capture guard (${before.listIds.length} listIDs vs ${before.entries.count} entry records); retrying.`,
+        `SeaDex changed while reading the pre-capture guard (${listCount} listIDs vs ${entryCount} entry records); retrying.`,
       );
       continue;
     }
@@ -43,7 +48,7 @@ export async function fetchConsistentSeaDexSnapshot(options) {
     });
 
     const after = await fetchSeaDexMutationGuard({ sourceBaseUrl, retryLimit, fetchImpl });
-    if (!guardIsInternallyConsistent(after) || before.fingerprint !== after.fingerprint) {
+    if (!isSeaDexMutationGuardInternallyConsistent(after) || before.fingerprint !== after.fingerprint) {
       log("SeaDex changed while the entry/torrent collection was being captured; retrying the capture.");
       continue;
     }
@@ -61,6 +66,7 @@ export async function fetchConsistentSeaDexSnapshot(options) {
       listIds: after.listIds,
       entries: capture.entries,
       seaDexFingerprint,
+      sourceGuard: after,
       sourceGuardFingerprint: after.fingerprint,
       captureAttempt: attempt,
     };
@@ -269,8 +275,21 @@ export function parseSeaDexListIds(text) {
   return [...ids].sort((left, right) => left - right);
 }
 
-function guardIsInternallyConsistent(guard) {
-  return guard.entries.count === guard.listIds.length;
+export function isSeaDexMutationGuardInternallyConsistent(guard) {
+  return Boolean(
+    guard &&
+      Array.isArray(guard.listIds) &&
+      guard.listIds.length > 0 &&
+      guard.entries &&
+      Number.isSafeInteger(guard.entries.count) &&
+      guard.entries.count > 0 &&
+      guard.entries.count === guard.listIds.length &&
+      guard.torrents &&
+      Number.isSafeInteger(guard.torrents.count) &&
+      guard.torrents.count >= 0 &&
+      typeof guard.fingerprint === "string" &&
+      /^[a-f0-9]{64}$/u.test(guard.fingerprint),
+  );
 }
 
 function requireItemsArray(payload, label) {

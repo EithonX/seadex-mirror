@@ -1,8 +1,28 @@
+type SourceCollectionRevision = {
+  count: number;
+  latest: {
+    id: string;
+    updated: string;
+  } | null;
+};
+
 export type MirrorStatus = {
   snapshot: {
     schemaVersion: number;
     id: string;
     sourceFingerprint: string;
+    sourceRevision: {
+      schemaVersion: number;
+      sourceBaseUrl: string;
+      seaDex: {
+        fingerprint: string;
+        listIdsSha256: string;
+        listIdCount: number;
+        entries: SourceCollectionRevision;
+        torrents: SourceCollectionRevision;
+      };
+      workbookContentSha256: string;
+    };
     createdAt: string;
     manifest: string;
   };

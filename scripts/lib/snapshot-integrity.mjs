@@ -4,7 +4,8 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
 export const SNAPSHOT_MANIFEST_SCHEMA_VERSION = 1;
-export const SNAPSHOT_SCHEMA_VERSION = 2;
+export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SOURCE_REVISION_SCHEMA_VERSION = 1;
 export const SNAPSHOT_MANIFEST_FILE = "manifest.json";
 
 export function sha256Buffer(value) {
@@ -36,8 +37,97 @@ export function buildWorkbookContentFingerprint(sheetWorkbook) {
   return sha256Json(normalizeWorkbookContent(sheetWorkbook));
 }
 
-export function buildSourceFingerprint({ seaDexFingerprint, workbookContentSha256 }) {
-  return sha256Json({ seaDexFingerprint, workbookContentSha256 });
+export function buildSourceFingerprint({ sourceBaseUrl, seaDexFingerprint, workbookContentSha256 }) {
+  const normalizedSourceBaseUrl = normalizeSourceBaseUrl(sourceBaseUrl);
+  return sha256Json({
+    sourceBaseUrl: normalizedSourceBaseUrl,
+    seaDexFingerprint,
+    workbookContentSha256,
+  });
+}
+
+export function buildSourceRevision({ sourceBaseUrl, seaDexGuard, workbookContentSha256 }) {
+  const normalizedSourceBaseUrl = normalizeSourceBaseUrl(sourceBaseUrl);
+  validateSha256(seaDexGuard?.fingerprint, "SeaDex guard fingerprint");
+  validateSha256(workbookContentSha256, "workbook content fingerprint");
+
+  const listIds = Array.isArray(seaDexGuard?.listIds) ? seaDexGuard.listIds : [];
+  if (listIds.length === 0 || listIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+    throw new Error("SeaDex guard must contain a non-empty list of positive integer AniList IDs.");
+  }
+  if (new Set(listIds).size !== listIds.length) {
+    throw new Error("SeaDex guard contains duplicate AniList IDs.");
+  }
+
+  const entries = normalizeCollectionRevision(seaDexGuard?.entries, "entries");
+  const torrents = normalizeCollectionRevision(seaDexGuard?.torrents, "torrents");
+  if (entries.count !== listIds.length) {
+    throw new Error(
+      `SeaDex guard is internally inconsistent: ${listIds.length} listIDs vs ${entries.count} entry records.`,
+    );
+  }
+
+  return {
+    schemaVersion: SOURCE_REVISION_SCHEMA_VERSION,
+    sourceBaseUrl: normalizedSourceBaseUrl,
+    seaDex: {
+      fingerprint: seaDexGuard.fingerprint,
+      listIdsSha256: sha256Json([...listIds].sort((left, right) => left - right)),
+      listIdCount: listIds.length,
+      entries,
+      torrents,
+    },
+    workbookContentSha256,
+  };
+}
+
+export function validateSourceRevision(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Snapshot source revision must be an object.");
+  }
+  if (value.schemaVersion !== SOURCE_REVISION_SCHEMA_VERSION) {
+    throw new Error(`Unsupported source revision schema version: ${value.schemaVersion}.`);
+  }
+
+  const sourceBaseUrl = normalizeSourceBaseUrl(value.sourceBaseUrl);
+  const seaDex = value.seaDex;
+  if (!seaDex || typeof seaDex !== "object" || Array.isArray(seaDex)) {
+    throw new Error("Snapshot source revision is missing SeaDex guard metadata.");
+  }
+  validateSha256(seaDex.fingerprint, "stored SeaDex guard fingerprint");
+  validateSha256(seaDex.listIdsSha256, "stored SeaDex listIDs fingerprint");
+  if (!Number.isSafeInteger(seaDex.listIdCount) || seaDex.listIdCount <= 0) {
+    throw new Error("Snapshot source revision has an invalid SeaDex listIdCount.");
+  }
+  const entries = normalizeCollectionRevision(seaDex.entries, "stored entries");
+  const torrents = normalizeCollectionRevision(seaDex.torrents, "stored torrents");
+  if (entries.count !== seaDex.listIdCount) {
+    throw new Error(
+      `Snapshot source revision is internally inconsistent: ${seaDex.listIdCount} listIDs vs ${entries.count} entry records.`,
+    );
+  }
+  validateSha256(value.workbookContentSha256, "stored workbook content fingerprint");
+
+  return {
+    schemaVersion: SOURCE_REVISION_SCHEMA_VERSION,
+    sourceBaseUrl,
+    seaDex: {
+      fingerprint: seaDex.fingerprint,
+      listIdsSha256: seaDex.listIdsSha256,
+      listIdCount: seaDex.listIdCount,
+      entries,
+      torrents,
+    },
+    workbookContentSha256: value.workbookContentSha256,
+  };
+}
+
+export function sourceRevisionMatches(left, right) {
+  try {
+    return stableStringify(validateSourceRevision(left)) === stableStringify(validateSourceRevision(right));
+  } catch {
+    return false;
+  }
 }
 
 export function buildSnapshotId({ sourceFingerprint, aniListMedia, sheetWorkbook = null }) {
@@ -233,6 +323,57 @@ function sortForStableJson(value) {
       .filter((key) => value[key] !== undefined)
       .map((key) => [key, sortForStableJson(value[key])]),
   );
+}
+
+function normalizeSourceBaseUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value ?? ""));
+  } catch (error) {
+    throw new Error("Source revision contains an invalid sourceBaseUrl.", { cause: error });
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Source revision uses an unsupported protocol: ${url.protocol}`);
+  }
+  url.hash = "";
+  url.search = "";
+  url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
+  return url.toString().replace(/\/$/u, "");
+}
+
+function normalizeCollectionRevision(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`SeaDex ${label} revision must be an object.`);
+  }
+  const count = Number(value.count);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error(`SeaDex ${label} revision has an invalid count.`);
+  }
+
+  if (count === 0) {
+    if (value.latest !== null) {
+      throw new Error(`SeaDex ${label} revision must have latest=null when count is 0.`);
+    }
+    return { count: 0, latest: null };
+  }
+
+  const latest = value.latest;
+  if (!latest || typeof latest !== "object" || Array.isArray(latest)) {
+    throw new Error(`SeaDex ${label} revision is missing its latest record.`);
+  }
+  if (typeof latest.id !== "string" || latest.id.length === 0) {
+    throw new Error(`SeaDex ${label} revision latest record has an invalid id.`);
+  }
+  if (typeof latest.updated !== "string" || !Number.isFinite(Date.parse(latest.updated))) {
+    throw new Error(`SeaDex ${label} revision latest record has an invalid updated timestamp.`);
+  }
+  return { count, latest: { id: latest.id, updated: latest.updated } };
+}
+
+function validateSha256(value, label) {
+  if (!/^[a-f0-9]{64}$/u.test(String(value ?? ""))) {
+    throw new Error(`${label} must be a SHA-256 hex digest.`);
+  }
 }
 
 function validateManifestShape(manifest) {
