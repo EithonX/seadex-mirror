@@ -1,3 +1,5 @@
+import { compileCatalogSearchQuery, scoreCatalogSearchItem } from "./catalog-search.mjs";
+
 type SourceCollectionRevision = {
   count: number;
   latest: {
@@ -334,18 +336,30 @@ export function filterCatalogItems(
   const order = normalizeCatalogSortOrder(input.order, sort);
   const limit = clampInt(input.limit, 24, 1, 100);
   const offset = clampInt(input.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-  const lowerSearch = search.toLowerCase();
+  const compiledSearch = compileCatalogSearchQuery(search);
+  const candidates = format ? items.filter((item) => (item.format ?? "").toUpperCase() === format) : items;
 
-  let filtered = items;
-  if (lowerSearch) {
-    filtered = filtered.filter((item) => item.searchText.includes(lowerSearch));
+  let sorted: CatalogIndexItem[];
+  if (compiledSearch) {
+    const ranked: Array<{ item: CatalogIndexItem; score: number }> = [];
+    for (const item of candidates) {
+      const score = scoreCatalogSearchItem(item, compiledSearch);
+      if (score !== null) {
+        ranked.push({ item, score });
+      }
+    }
+    // Relevance bands keep exact/strong title matches ahead of incidental
+    // matches, while the user's selected view still orders comparable hits.
+    ranked.sort(
+      (left, right) =>
+        Math.floor(right.score / 500) - Math.floor(left.score / 500) ||
+        compareCatalogItems(left.item, right.item, sort, order) ||
+        right.score - left.score,
+    );
+    sorted = ranked.map(({ item }) => item);
+  } else {
+    sorted = [...candidates].sort((left, right) => compareCatalogItems(left, right, sort, order));
   }
-
-  if (format) {
-    filtered = filtered.filter((item) => (item.format ?? "").toUpperCase() === format);
-  }
-
-  const sorted = [...filtered].sort((left, right) => compareCatalogItems(left, right, sort, order));
   const sliced = sorted.slice(offset, offset + limit);
   const pageItems = sliced.map(stripSearchText);
   const nextOffset = offset + limit < sorted.length ? offset + limit : null;
