@@ -4,113 +4,32 @@
 [![Mirror Rebuild](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/rebuild-mirror.yml?branch=main&label=mirror%20rebuild)](https://github.com/EithonX/seadex-mirror/actions/workflows/rebuild-mirror.yml)
 [![Deploy](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/deploy-site.yml?branch=main&label=deploy)](https://github.com/EithonX/seadex-mirror/actions/workflows/deploy-site.yml)
 
-An unofficial, fully static mirror and recovery backup of [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)). The project is intentionally designed to run without a database, server process, paid storage service, or server-side application runtime.
+An unofficial static mirror of [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)), the anime release recommendation index. Built so the data stays accessible even when the original is unavailable.
 
 **Live site:** [seadex.pages.dev](https://seadex.pages.dev)
 
-## Architecture
+## How it works
 
 ```mermaid
 flowchart LR
-    A[SeaDex API] --> B[Stable source capture]
-    C[Published workbook] --> B
-    B --> D[Authoritative source fingerprint]
-    E[AniList API] --> F[TTL cache + stale fallback]
-    D --> G[Static snapshot builder]
-    F --> G
-    G --> H[SHA-256 manifest + full verifier]
-    H --> I[Vite static site]
-    I --> J[Cloudflare Pages]
-    J --> K[Exact deployment verification]
-    K --> L[GitHub Release recovery archive]
+    A[SeaDex] --> B[Snapshot Builder]
+    C[AniList] --> B
+    D[Published Workbook] --> B
+    B --> E[Verified Static JSON]
+    E --> F[Vite]
+    F --> G[Cloudflare Pages]
+    E --> H[Recovery Archive]
 ```
 
-The live site is only static HTML, CSS, JavaScript, and JSON. Browsing it requires no API keys and executes no server-side application code.
+The builder pulls SeaDex entries and torrent data, mirrors the published workbook, enriches entries with AniList metadata, verifies the resulting snapshot, and writes static JSON for the frontend.
 
-The backup pipeline is deliberately fail-closed: a partial SeaDex response, inconsistent expanded torrent set, corrupted generated file, incomplete remote sync, or mismatched deployment is rejected rather than replacing the previous known-good snapshot.
+There is no database or server-side application runtime. Browsing the mirror requires no API keys.
 
-## What makes a snapshot trustworthy
-
-Every scheduled build performs the following checks before it can become the live backup:
-
-1. Fetch the full SeaDex ID list and full expanded entry/torrent dataset.
-2. Verify ID parity and linked-vs-expanded torrent parity.
-3. Fetch SeaDex repeatedly until two consecutive complete source captures have the same SHA-256 fingerprint. This avoids publishing a mixed snapshot while upstream is changing.
-4. Fetch the published workbook and include its raw SHA-256 in the authoritative source fingerprint.
-5. Reuse fresh AniList cache records, refresh records older than the configured TTL, and keep stale cached metadata if AniList is temporarily unavailable.
-6. Build the complete static snapshot in a staging directory.
-7. Generate `manifest.json`, containing every snapshot file's byte size and SHA-256 digest.
-8. Verify every file against the manifest and verify catalog/entry/torrent invariants.
-9. Atomically replace the previous local snapshot only after verification succeeds.
-10. Build the frontend and check Cloudflare Pages file-count/per-file-size limits before deployment.
-11. Deploy to Cloudflare Pages, verify the unique deployment URL against the exact local snapshot ID and manifest hash, then verify the production alias.
-12. Only after deployment verification succeeds, archive the verified `mirror-data` snapshot as a rolling GitHub Release recovery asset.
-
-A scheduled run can therefore fail without destroying the last usable backup.
-
-## Recovery copies
-
-Cloudflare Pages is the live serving copy. GitHub Releases is the independent recovery copy.
-
-Successful deploys create release tags in this form:
-
-```text
-snapshot-<snapshot-id>-<manifest-sha-prefix>
-```
-
-Each automated recovery release contains:
-
-- `seadex-mirror-<snapshot-id>.tar.gz` — the complete `mirror-data/` directory
-- `archive.sha256` — checksum for the compressed archive
-- `manifest.json` — per-file manifest for the uncompressed snapshot
-- `manifest.sha256` — checksum for the manifest itself
-
-The workflow retains the newest 14 automated snapshot releases and prunes older `snapshot-*` releases. Normal project releases are never touched.
-
-### Recover from the live mirror
-
-If upstream is unavailable but the Cloudflare copy is healthy:
-
-```bash
-npm run data:sync-live
-npm run verify:mirror-data
-```
-
-`data:sync-live` fetches the remote manifest first, downloads exactly the files it names, verifies every byte count and SHA-256 digest in staging, and then performs an atomic replacement. A failed sync leaves the existing local snapshot intact.
-
-### Recover from a GitHub Release
-
-If both upstream and the live Cloudflare deployment are unavailable:
-
-1. Download a known-good automated snapshot release.
-2. Verify the downloaded files before extracting them:
-
-```bash
-sha256sum -c archive.sha256
-sha256sum -c manifest.sha256
-```
-
-3. Extract the archive directly beneath `frontend/public/`:
-
-```bash
-mkdir -p frontend/public
-tar -C frontend/public -xzf seadex-mirror-<snapshot-id>.tar.gz
-```
-
-4. Run:
-
-```bash
-npm run verify:mirror-data
-npm run build:frontend
-npm run verify:frontend-build
-npm run verify:pages-limits
-```
-
-Then deploy the verified static build normally.
+Builds fail closed: incomplete or inconsistent upstream data does not replace the previous known-good snapshot.
 
 ## Getting started
 
-**Prerequisite:** Node.js 24.x (LTS) or Node.js 26.x (Current). CI uses Node.js 24.x.
+**Prerequisite:** Node.js 24 or 26. CI uses Node.js 24.
 
 ```bash
 git clone https://github.com/EithonX/seadex-mirror.git
@@ -118,129 +37,89 @@ cd seadex-mirror
 npm ci
 ```
 
-Generate a live snapshot and start the development server:
+Build a fresh snapshot and start the development server:
 
 ```bash
 npm run data:build
 npm run dev
 ```
 
-The builder works with AniList's public GraphQL endpoint. `ANILIST_ACCESS_TOKEN` is optional and is used only by the build step when configured.
+AniList authentication is optional. Without a token, the builder uses the public GraphQL API.
 
 ## Commands
 
-| Command | Purpose |
+| Command | What it does |
 |---|---|
 | `npm run dev` | Start the Vite development server |
-| `npm run build` | Build a complete deployable data + frontend snapshot |
-| `npm run build:frontend` | Build only the frontend around existing mirror data |
-| `npm run data:build` | Capture authoritative upstream data and build a verified local snapshot |
-| `npm run data:sync-live` | Restore the currently deployed snapshot with manifest verification |
-| `npm run typecheck` | Run strict TypeScript checks |
-| `npm test` | Run regression tests for HTTP, atomic replacement, and snapshot integrity |
+| `npm run dev:pages` | Serve the production build with Wrangler Pages locally |
+| `npm run build` | Build a complete deployable snapshot |
+| `npm run build:frontend` | Build only the frontend |
+| `npm run data:build` | Fetch upstream data and build a verified snapshot |
+| `npm run data:sync-live` | Restore the current live snapshot locally |
 | `npm run verify` | Run typechecking and regression tests |
-| `npm run verify:mirror-data` | Verify the full local manifest and every generated entry/invariant |
-| `npm run verify:frontend-build` | Verify the production bundle and copied snapshot integrity |
-| `npm run verify:pages-limits` | Fail before deploy if the built site exceeds configured Pages limits |
-| `npm run verify:deployed-site` | Verify a deployed site against an expected snapshot/manifest identity |
-| `npm run deploy` | Build and deploy directly with Wrangler |
+| `npm run verify:mirror-data` | Verify generated mirror data and its manifest |
+| `npm run verify:frontend-build` | Verify the production frontend output |
+| `npm run verify:pages-limits` | Check the build against Cloudflare Pages limits |
+| `npm run deploy` | Build and deploy with Wrangler |
 
-## Data pipeline details
+## Data pipeline
 
-### Authoritative change detection
+The builder:
 
-The scheduled workflow does **not** use a small recent-entry probe. It hashes the complete, validated SeaDex source representation plus the raw workbook SHA-256. Torrent-only changes and workbook-only changes therefore invalidate the source fingerprint even when entry IDs are unchanged.
+1. Fetches the complete SeaDex entry collection with expanded torrent records.
+2. Requires two consecutive matching source captures before accepting the snapshot.
+3. Mirrors the published workbook.
+4. Enriches entries with AniList metadata, using a TTL cache and stale fallback.
+5. Builds the snapshot in staging and verifies entry/torrent invariants.
+6. Generates a SHA-256 manifest covering every mirrored data file.
+7. Replaces the previous local snapshot only after verification succeeds.
 
-`--onUnchanged=skip` is used by scheduled rebuilds. If the authoritative source fingerprint matches the deployed snapshot and no AniList cache record is due for refresh, CI exits without another deployment.
+Generated data lives under `frontend/public/mirror-data/` and is intentionally gitignored.
 
-`--onUnchanged=materialize` is used for code-driven deployments from clean CI checkouts. When authoritative inputs are unchanged, the builder can reconstruct the same data snapshot using the deployed AniList cache so a frontend-only change still gets a complete static deployment.
+## Recovery
 
-### AniList resilience
+Cloudflare Pages serves the live mirror. Successful verified deployments also publish rolling `snapshot-*` recovery releases on GitHub, so the backup does not depend on the live Pages deployment alone.
 
-AniList enriches SeaDex records but is not authoritative for the backed-up torrent data.
+If upstream is unavailable but the live mirror is healthy:
 
-- Cache freshness defaults to 168 hours.
-- Fresh cache records are reused without an API request.
-- Missing or expired records are refreshed in paced batches.
-- Authenticated requests fall back to public requests if configured authentication fails.
-- A failed refresh retains stale cached AniList metadata when available.
-- A newly missing AniList record does not cause valid SeaDex data to be discarded.
+```bash
+npm run data:sync-live
+npm run verify:mirror-data
+```
 
-Override the TTL with `ANILIST_CACHE_TTL_HOURS` or `--anilistCacheTtlHours`.
-
-### Generated snapshot
-
-`frontend/public/mirror-data/` contains:
-
-| File | Purpose |
-|---|---|
-| `manifest.json` | Snapshot identity, total bytes/files, and SHA-256 for every other snapshot file |
-| `status.json` | Counts, source fingerprint, snapshot ID, timestamps, and integrity state |
-| `catalog.json` | Compact catalog used for home-page filtering/search |
-| `entries/<alId>.json` | Complete per-entry data and torrent rows |
-| `sheet.json` | Compact sheet-oriented entry projection |
-| `sheet-workbook.json` | Mirrored published workbook, loaded only on the Sheet page |
-| `anilist-cache.json` | AniList enrichment cache with per-record fetch timestamps |
-
-Generated mirror data is intentionally gitignored. Git stores the code; Cloudflare Pages serves the current copy; automated GitHub Releases retain independent known-good data copies.
-
-## Frontend behavior
-
-The frontend is designed to remain useful under partial failure:
-
-- `status.json` is freshness metadata, not a hard dependency; catalog, entry, sheet, and about pages continue when it is temporarily unavailable.
-- failed in-memory fetches are evicted so a retry can actually recover instead of reusing a rejected Promise.
-- fatal states expose both **Try again** and **Return home** actions.
-- external source/workbook/comparison URLs are protocol-validated before rendering; torrent actions additionally permit legitimate `magnet:` links.
-- generated JSON is configured to revalidate instead of allowing long-lived browser copies from different deployments to linger together.
-- the footer surfaces the active snapshot identity when freshness metadata is available.
+A downloaded recovery archive can be extracted beneath `frontend/public/`, then verified and rebuilt normally.
 
 ## Deployment
 
-The GitHub workflows use Cloudflare Pages Direct Upload.
+Deployment uses Cloudflare Pages Direct Upload through GitHub Actions.
 
 ### Required GitHub secrets
 
 | Secret | Purpose |
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier |
-| `CLOUDFLARE_API_TOKEN` | Token scoped for the Pages deployment |
+| `CLOUDFLARE_API_TOKEN` | Token with Pages deployment access |
 
-### Optional secret / variable
+### Optional
 
 | Name | Purpose |
 |---|---|
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Pages project name; defaults to `seadex` |
 | `ANILIST_ACCESS_TOKEN` | Optional AniList bearer token |
-| `ANILIST_CLIENT_ID` | Accepted for compatibility/documentation; does not authenticate public GraphQL by itself |
-| `ANILIST_CLIENT_SECRET` | Accepted for compatibility/documentation; does not authenticate public GraphQL by itself |
 
-Secrets are provided only to the steps that need them. Dependency installation, tests, and unrelated Actions do not receive Cloudflare or AniList credentials. Third-party Actions are pinned to immutable full commit SHAs and are kept current through Dependabot.
+[`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) checks for upstream changes every 12 hours and publishes a new verified snapshot when needed.
 
-### Workflows
+[`deploy-site.yml`](.github/workflows/deploy-site.yml) handles code-driven deployments from `main`.
 
-- [`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) runs every 12 hours and supports a manual forced rebuild.
-- [`deploy-site.yml`](.github/workflows/deploy-site.yml) runs when deploy-relevant code/config changes on `main`, materializes verified mirror data, and deploys the updated static site.
-- [`codeql.yml`](.github/workflows/codeql.yml) performs scheduled and PR/push CodeQL analysis.
+GitHub Actions are pinned to immutable commit SHAs. Cloudflare and AniList credentials are exposed only to the steps that require them.
 
-The deploy jobs verify both the unique Cloudflare deployment URL and the production `pages.dev` alias before the snapshot becomes an archival release.
+## Caching
 
-## Configuration
-
-See [`.env.example`](.env.example). Important builder knobs include:
-
-- `SOURCE_BASE_URL`
-- `SHEET_WORKBOOK_URL`
-- `ANILIST_GRAPHQL_URL`
-- `ANILIST_ACCESS_TOKEN`
-- `ANILIST_CACHE_TTL_HOURS`
-- `MIRROR_STATUS_URL`
-
-Network requests use bounded timeouts, retry transient HTTP failures (`408`, `425`, `429`, selected `5xx`), honor `Retry-After`, and enforce response-size ceilings where large upstream payloads are expected.
+Hashed frontend assets are cached immutably. Mirror JSON uses revalidation, allowing browsers to reuse unchanged responses while avoiding long-lived mixtures of data from different deployments.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md). Do not disclose a suspected credential leak or exploitable vulnerability in a public issue.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Contributing
 
@@ -252,5 +131,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-- [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)) — upstream data/project
-- [AniList](https://anilist.co) — anime metadata enrichment
+- [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)) — upstream project and data
+- [AniList](https://anilist.co) — anime metadata
