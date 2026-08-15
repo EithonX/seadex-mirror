@@ -22,6 +22,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      SURGE_DOMAIN: ${{ vars.SURGE_DOMAIN || 'seadex.surge.sh' }}
+      SURGE_CLI_VERSION: "0.41.2"
     timeout-minutes: 45
     permissions:
       contents: read
@@ -73,6 +76,9 @@ jobs:
       - name: Check Cloudflare Pages limits
         run: npm run verify:pages-limits
 
+      - name: Check Surge limits
+        run: npm run verify:surge-limits
+
       - name: Read deployment identity
         id: snapshot
         shell: bash
@@ -87,8 +93,8 @@ jobs:
             echo "site-fingerprint=$site_fingerprint"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check whether production output changed
-        id: site-change
+      - name: Check whether Cloudflare output changed
+        id: cloudflare-change
         shell: bash
         env:
           SITE_BASE_URL: ${{ format('https://{0}.pages.dev', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
@@ -98,12 +104,31 @@ jobs:
           deploy="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('.site-deploy-report.json','utf8')); process.stdout.write(String(Boolean(r.deploy)));")"
           echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
 
-      - name: Skip unchanged deployment
-        if: steps.site-change.outputs.deploy != 'true'
-        run: echo "Built site is byte-identical to verified production; skipping Cloudflare deployment."
+      - name: Check whether Surge output changed
+        id: surge-change
+        shell: bash
+        env:
+          SITE_BASE_URL: ${{ format('https://{0}', env.SURGE_DOMAIN) }}
+        run: |
+          set -euo pipefail
+          node scripts/check-site-deployment.mjs --report .surge-deploy-report.json
+          deploy="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('.surge-deploy-report.json','utf8')); process.stdout.write(String(Boolean(r.deploy)));")"
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
+      - name: Mark verified publish inputs
+        id: publish-ready
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unchanged Cloudflare deployment
+        if: steps.cloudflare-change.outputs.deploy != 'true'
+        run: echo "Built site is byte-identical to verified Cloudflare production; skipping Pages deployment."
+
+      - name: Skip unchanged Surge deployment
+        if: steps.surge-change.outputs.deploy != 'true'
+        run: echo "Built site is byte-identical to verified Surge production; skipping Surge deployment."
 
       - name: Verify Cloudflare Pages access
-        if: steps.site-change.outputs.deploy == 'true'
+        if: steps.cloudflare-change.outputs.deploy == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -111,7 +136,7 @@ jobs:
         run: node scripts/verify-cloudflare.mjs
 
       - name: Deploy Pages site
-        if: steps.site-change.outputs.deploy == 'true'
+        if: steps.cloudflare-change.outputs.deploy == 'true'
         id: deploy-pages
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         env:
@@ -124,7 +149,7 @@ jobs:
           command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=main --commit-dirty=true
 
       - name: Verify exact Pages deployment
-        if: steps.site-change.outputs.deploy == 'true'
+        if: steps.cloudflare-change.outputs.deploy == 'true'
         env:
           DEPLOYED_SITE_URL: ${{ steps.deploy-pages.outputs.deployment-url }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
@@ -133,9 +158,33 @@ jobs:
         run: npm run verify:deployed-site
 
       - name: Verify production alias
-        if: steps.site-change.outputs.deploy == 'true'
+        if: steps.cloudflare-change.outputs.deploy == 'true'
         env:
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
+          EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
+          EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
+        run: npm run verify:deployed-site
+
+      - name: Deploy Surge mirror
+        if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && steps.surge-change.outputs.deploy == 'true' }}
+        id: deploy-surge
+        shell: bash
+        env:
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
+          SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SURGE_TOKEN:-}" ]; then
+            echo "SURGE_TOKEN is required when the Surge mirror needs publication." >&2
+            exit 1
+          fi
+          npm exec --yes --package="surge@${SURGE_CLI_VERSION}" -- surge ./dist "https://${SURGE_DOMAIN}" --message "snapshot ${SNAPSHOT_ID}"
+
+      - name: Verify Surge mirror
+        if: ${{ always() && steps.publish-ready.outputs.ready == 'true' && steps.surge-change.outputs.deploy == 'true' && steps.deploy-surge.outcome == 'success' }}
+        env:
+          DEPLOYED_SITE_URL: ${{ format('https://{0}', env.SURGE_DOMAIN) }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
           EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}

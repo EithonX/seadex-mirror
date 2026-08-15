@@ -16,3 +16,5 @@ frontend/public/mirror-data/
 .gemini/
 
 .site-deploy-report.json
+.surge-deploy-report.json
+.surge-health-report.json

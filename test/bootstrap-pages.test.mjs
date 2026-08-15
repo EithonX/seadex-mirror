@@ -30,3 +30,12 @@ function runNode(args) {
     child.on("close", (code) => resolvePromise({ code, stdout, stderr }));
   });
 }
+
+test("Surge bootstrap command has a side-effect-free help path", async () => {
+  const result = await runNode(["scripts/bootstrap-surge.mjs", "--help"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /without contacting\s+SeaDex or AniList/u);
+  assert.match(result.stdout, /surge@0\.41\.2/u);
+  assert.match(result.stdout, /seadex\.surge\.sh/u);
+  assert.equal(result.stderr, "");
+});

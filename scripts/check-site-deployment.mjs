@@ -47,7 +47,7 @@ async function main() {
     console.log(`Site deployment required: ${report.reason}.`);
   } else {
     console.log(
-      `Site output is unchanged (${local.fingerprint.slice(0, 12)}); Cloudflare deployment can be skipped.`,
+      `Site output is unchanged (${local.fingerprint.slice(0, 12)}); deployment can be skipped.`,
     );
   }
   console.log(JSON.stringify(report, null, 2));

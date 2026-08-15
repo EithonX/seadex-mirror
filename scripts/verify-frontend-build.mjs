@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSnapshotManifest, verifySnapshotManifest } from "./lib/snapshot-integrity.mjs";
+import { DEFAULT_SURGE_DOMAIN, normalizeSurgeDomain } from "./lib/surge.mjs";
 import {
   SITE_BUILD_FILE,
   createSiteBuildDescriptor,
@@ -13,6 +14,9 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distDir = join(repoRoot, "dist");
 const assetsDir = join(distDir, "assets");
 const indexHtmlPath = join(distDir, "index.html");
+const surgeFallbackPath = join(distDir, "200.html");
+const surgeCnamePath = join(distDir, "CNAME");
+const surgeDomain = normalizeSurgeDomain(process.env.SURGE_DOMAIN ?? DEFAULT_SURGE_DOMAIN);
 const mirrorDataDir = join(distDir, "mirror-data");
 const mirrorEntriesDir = join(mirrorDataDir, "entries");
 const mirrorStatusPath = join(mirrorDataDir, "status.json");
@@ -74,6 +78,8 @@ async function readJsonFile(path, label) {
 }
 
 await assertFile(indexHtmlPath, "dist/index.html");
+await assertFile(surgeFallbackPath, "dist/200.html");
+await assertFile(surgeCnamePath, "dist/CNAME");
 await assertDirectory(assetsDir, "dist/assets");
 await assertDirectory(mirrorDataDir, "dist/mirror-data");
 await assertDirectory(mirrorEntriesDir, "dist/mirror-data/entries");
@@ -124,10 +130,19 @@ try {
   fail(`dist site build identity verification failed: ${error instanceof Error ? error.message : String(error)}`);
 }
 
-const [indexHtml, assetEntries] = await Promise.all([
+const [indexHtml, surgeFallbackHtml, surgeCname, assetEntries] = await Promise.all([
   readFile(indexHtmlPath, "utf8"),
+  readFile(surgeFallbackPath, "utf8"),
+  readFile(surgeCnamePath, "utf8"),
   readdir(assetsDir, { withFileTypes: true }),
 ]);
+
+if (surgeFallbackHtml !== indexHtml) {
+  fail("dist/200.html must exactly match dist/index.html for Surge SPA routing.");
+}
+if (surgeCname.trim() !== surgeDomain) {
+  fail(`dist/CNAME is ${JSON.stringify(surgeCname.trim())}, expected ${surgeDomain}.`);
+}
 
 const jsAssets = assetEntries
   .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))

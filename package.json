@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:site",
-    "build:frontend": "vite build && node scripts/stamp-site-build.mjs",
+    "build:frontend": "vite build && node scripts/prepare-static-hosts.mjs && node scripts/stamp-site-build.mjs",
     "build:site": "npm run data:build -- --onUnchanged=materialize && npm run build:frontend",
     "data:build": "node scripts/build-static-data.mjs",
     "data:sync-live": "node scripts/sync-live-mirror-data.mjs",
@@ -20,7 +20,9 @@
     "verify:mirror-data": "node scripts/verify-mirror-data.mjs",
     "test": "node --test test/*.test.mjs",
     "verify": "npm run typecheck && npm test",
-    "verify:pages-limits": "node scripts/verify-pages-limits.mjs"
+    "verify:pages-limits": "node scripts/verify-pages-limits.mjs",
+    "deploy:surge-bootstrap": "node scripts/bootstrap-surge.mjs",
+    "verify:surge-limits": "node scripts/verify-surge-limits.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260813.1",

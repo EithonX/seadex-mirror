@@ -6,7 +6,7 @@
 
 An unofficial static mirror of [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)), the anime release recommendation index. Built so the data stays accessible even when the original is unavailable.
 
-**Live site:** [seadex.pages.dev](https://seadex.pages.dev)
+**Primary:** [seadex.pages.dev](https://seadex.pages.dev) · **Backup:** [seadex.surge.sh](https://seadex.surge.sh)
 
 ## How it works
 
@@ -18,6 +18,7 @@ flowchart LR
     B --> E[Verified Static JSON]
     E --> F[Vite]
     F --> G[Cloudflare Pages]
+    F --> H[Surge]
 ```
 
 The builder pulls SeaDex entries and torrent data, mirrors the published workbook, enriches entries with AniList metadata, verifies the resulting snapshot, and writes static JSON for the frontend.
@@ -59,8 +60,10 @@ AniList authentication is optional. Without a token, the builder uses the public
 | `npm run verify:mirror-data` | Verify generated mirror data and its manifest |
 | `npm run verify:frontend-build` | Verify the production frontend output |
 | `npm run verify:pages-limits` | Check the build against Cloudflare Pages limits |
+| `npm run verify:surge-limits` | Check the build against Surge limits and SPA files |
 | `npm run deploy` | Build and deploy with Wrangler |
-| `npm run deploy:bootstrap` | Publish the existing verified local snapshot without refetching upstream data |
+| `npm run deploy:bootstrap` | Bootstrap Cloudflare from the existing verified local snapshot |
+| `npm run deploy:surge-bootstrap` | Bootstrap Surge from the same verified local snapshot |
 
 ## Data pipeline
 
@@ -78,20 +81,20 @@ Generated data lives under `frontend/public/mirror-data/` and is intentionally g
 
 ## Recovery
 
-Cloudflare Pages serves the live mirror. Successful verified deployments also publish rolling `snapshot-*` recovery releases on GitHub, so the backup does not depend on the live Pages deployment alone.
+The verified site is published independently to Cloudflare Pages and Surge. Both hosts serve the same `snapshotId`, mirror manifest, and `site-build.json` fingerprint.
 
-If upstream is unavailable but the live mirror is healthy:
+If upstream is unavailable but Cloudflare is healthy:
 
 ```bash
 npm run data:sync-live
 npm run verify:mirror-data
 ```
 
-A downloaded recovery archive can be extracted beneath `frontend/public/`, then verified and rebuilt normally.
+Scheduled checks also compare Surge with the primary deployment and repair the secondary mirror when it falls behind.
 
 ## Deployment
 
-Deployment uses Cloudflare Pages Direct Upload through GitHub Actions.
+Deployment uses one verified `dist/` tree for both Cloudflare Pages and Surge. Provider publication is skipped independently when that host already serves the same site fingerprint.
 
 ### Required GitHub secrets
 
@@ -99,6 +102,7 @@ Deployment uses Cloudflare Pages Direct Upload through GitHub Actions.
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier |
 | `CLOUDFLARE_API_TOKEN` | Token with Pages deployment access |
+| `SURGE_TOKEN` | Surge automation token; preferably scoped to the mirror domain |
 
 ### Optional
 
@@ -106,14 +110,25 @@ Deployment uses Cloudflare Pages Direct Upload through GitHub Actions.
 |---|---|
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Pages project name; defaults to `seadex` |
 | `ANILIST_ACCESS_TOKEN` | Optional AniList bearer token |
+| `SURGE_DOMAIN` | Surge hostname; defaults to `seadex.surge.sh` |
 
-[`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) checks for upstream changes every 12 hours and publishes a new verified snapshot when needed.
+[`rebuild-mirror.yml`](.github/workflows/rebuild-mirror.yml) checks upstream every 12 hours, publishes changed snapshots to both hosts, and verifies/repairs the Surge mirror when the source is unchanged.
 
 [`deploy-site.yml`](.github/workflows/deploy-site.yml) handles code-driven deployments from `main`. It restores the currently verified production snapshot before rebuilding the frontend, so code-only deploys do not need to refetch SeaDex or AniList.
 
-For a new or intentionally reset Pages deployment, generate and verify a snapshot locally, authenticate Wrangler with `npx wrangler login`, then run `npm run deploy:bootstrap`. This seeds production with the current manifest-backed format; CI does not include compatibility code for older snapshot schemas.
+For a new or intentionally reset Pages deployment, generate and verify a snapshot locally, authenticate Wrangler with `npx wrangler login`, then run `npm run deploy:bootstrap`.
 
-GitHub Actions are pinned to immutable commit SHAs. Cloudflare and AniList credentials are exposed only to the steps that require them.
+To claim or reset the Surge mirror, authenticate once with the pinned Surge CLI and deploy the same local snapshot:
+
+```bash
+npm exec --yes --package=surge@0.41.2 -- surge login
+npm exec --yes --package=surge@0.41.2 -- surge verify
+npm run deploy:surge-bootstrap
+```
+
+After the domain exists, create a domain-scoped automation token with `npm exec --yes --package=surge@0.41.2 -- surge tokens add --domain seadex.surge.sh -m "GitHub Actions"` and store the returned token as the `SURGE_TOKEN` GitHub secret. CI does not include compatibility code for older snapshot schemas.
+
+GitHub Actions are pinned to immutable commit SHAs. Cloudflare, Surge, and AniList credentials are exposed only to the steps that require them.
 
 ## Caching
 
