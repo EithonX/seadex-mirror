@@ -312,13 +312,13 @@ function renderTrackerTorrentActions(tracker: string, torrents: EntryPayload["to
 }
 
 function collectTrackerActions(tracker: string, torrents: EntryPayload["torrents"]) {
-  const publicActions = new Map<string, TorrentAction>();
-  let hasPrivate = false;
+  const actions = new Map<string, TorrentAction>();
+  let hasPrivateWithoutUrl = false;
 
   for (const [index, torrent] of torrents.entries()) {
     const links = classifyTorrentLinks(torrent, true);
     if (links.publicUrl) {
-      publicActions.set(links.publicUrl, {
+      actions.set(links.publicUrl, {
         buttonLabel: tracker || "Other",
         menuLabel: describeTorrentAction(torrent, index),
         href: links.publicUrl,
@@ -327,16 +327,24 @@ function collectTrackerActions(tracker: string, torrents: EntryPayload["torrents
       });
     }
 
-    if (links.hasPrivate) {
-      hasPrivate = true;
+    if (links.privateUrl) {
+      actions.set(links.privateUrl, {
+        buttonLabel: "Private Tracker",
+        menuLabel: describeTorrentAction(torrent, index),
+        href: links.privateUrl,
+        tracker,
+        isPrivate: true,
+      });
+    } else if (links.hasPrivate) {
+      hasPrivateWithoutUrl = true;
     }
   }
 
-  if (publicActions.size > 0) {
-    return [...publicActions.values()];
+  if (actions.size > 0) {
+    return [...actions.values()];
   }
 
-  if (hasPrivate) {
+  if (hasPrivateWithoutUrl) {
     return [
       {
         buttonLabel: "Private Tracker",
@@ -364,7 +372,11 @@ function renderTrackerAction(action: TorrentAction): string {
 
   const safeHref = safeExternalUrl(action.href, TORRENT_LINK_PROTOCOLS);
   if (safeHref) {
-    return `<a class="torrent-button" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${renderTrackerIcon(action.tracker || action.buttonLabel)} ${label}</a>`;
+    const buttonClass = action.isPrivate ? "torrent-button torrent-button--private-link" : "torrent-button";
+    const icon = action.isPrivate
+      ? renderPrivateTrackerIcon()
+      : renderTrackerIcon(action.tracker || action.buttonLabel);
+    return `<a class="${buttonClass}" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${icon} ${label}</a>`;
   }
 
   if (action.isPrivate) {
@@ -563,6 +575,7 @@ function classifyTorrentLinks(torrent: EntryPayload["torrents"][number], preferG
 
   return {
     publicUrl,
+    privateUrl,
     publicLabel: publicUrl ? renderTrackerLabel(publicUrl) : "Public",
     hasPrivate: Boolean(privateUrl || trackerIsPrivate),
   };

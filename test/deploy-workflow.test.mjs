@@ -54,7 +54,7 @@ test("workflows preserve Cloudflare immutable deployment history and add stable 
     assert.match(workflow, /--environment "Surge Backup"/u);
     assert.match(workflow, /--url "https:\/\/\$\{SURGE_DOMAIN\}"/u);
     assert.match(workflow, /- name: Ensure Cloudflare stable deployment/u);
-    assert.match(workflow, /--environment "Cloudflare Primary"/u);
+    assert.match(workflow, /--environment "production"/u);
     assert.match(workflow, /STABLE_DEPLOYMENT_URL: \$\{\{ format\('https:\/\/\{0\}\.pages\.dev'/u);
     assert.match(workflow, /--snapshot "\$\{\{ steps\.snapshot\.outputs\.snapshot-id \}\}"/u);
     assert.match(workflow, /--fingerprint "\$\{\{ steps\.snapshot\.outputs\.site-fingerprint \}\}"/u);
@@ -74,7 +74,7 @@ test("stable deployment records seed on verified no-op output, remain idempotent
     );
     assert.ok(
       workflow.indexOf("Ensure Surge stable deployment") < workflow.indexOf("Ensure Cloudflare stable deployment"),
-      "Cloudflare stable deployment should be ensured last so the primary stable URL is the newest custom deployment record",
+      "Cloudflare stable deployment should be ensured last so the stable production URL is the newest custom deployment record",
     );
   }
 });

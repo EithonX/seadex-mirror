@@ -14,9 +14,9 @@ test("stable GitHub deployment uses a production environment, stable URL, and co
   assert.deepEqual(
     buildDeploymentPayload({
       ref: "a".repeat(40),
-      environment: "Cloudflare Primary",
+      environment: "production",
       environmentUrl: "https://seadex.pages.dev/",
-      description: "Verified Cloudflare primary mirror",
+      description: "Verified Cloudflare primary alias",
       snapshotId: SNAPSHOT,
       siteFingerprint: FINGERPRINT,
     }),
@@ -25,8 +25,8 @@ test("stable GitHub deployment uses a production environment, stable URL, and co
       task: "deploy",
       auto_merge: false,
       required_contexts: [],
-      environment: "Cloudflare Primary",
-      description: "Verified Cloudflare primary mirror",
+      environment: "production",
+      description: "Verified Cloudflare primary alias",
       transient_environment: false,
       production_environment: true,
       payload: {
@@ -40,16 +40,16 @@ test("stable GitHub deployment uses a production environment, stable URL, and co
 
   assert.deepEqual(
     buildDeploymentStatusPayload({
-      environment: "Cloudflare Primary",
+      environment: "production",
       environmentUrl: "https://seadex.pages.dev/",
-      description: "Verified Cloudflare primary mirror",
+      description: "Verified Cloudflare primary alias",
       logUrl: "https://github.com/EithonX/seadex-mirror/actions/runs/123",
     }),
     {
       state: "success",
-      environment: "Cloudflare Primary",
+      environment: "production",
       environment_url: "https://seadex.pages.dev",
-      description: "Verified Cloudflare primary mirror",
+      description: "Verified Cloudflare primary alias",
       auto_inactive: false,
       log_url: "https://github.com/EithonX/seadex-mirror/actions/runs/123",
     },
@@ -137,9 +137,9 @@ test("ensureStableGitHubDeployment is idempotent for an already successful match
     token: "test-token",
     repository: "EithonX/seadex-mirror",
     ref: "c".repeat(40),
-    environment: "Cloudflare Primary",
+    environment: "production",
     environmentUrl: "https://seadex.pages.dev",
-    description: "Verified Cloudflare primary mirror",
+    description: "Verified Cloudflare primary alias",
     snapshotId: SNAPSHOT,
     siteFingerprint: FINGERPRINT,
   });
@@ -147,7 +147,7 @@ test("ensureStableGitHubDeployment is idempotent for an already successful match
   assert.deepEqual(result, {
     created: false,
     deploymentId: 77,
-    environment: "Cloudflare Primary",
+    environment: "production",
     environmentUrl: "https://seadex.pages.dev",
   });
   assert.equal(calls.length, 2, "no create/status POST should occur for the same successful content identity");

@@ -1480,9 +1480,20 @@ img {
 .site-footer__right {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0;
   flex-wrap: wrap;
   font-size: 0.8rem;
+}
+
+.site-footer__stats,
+.site-footer__verification {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.site-footer__verification:not(.site-footer__verification--standalone) {
+  padding-left: 0.5rem;
 }
 
 .stat-group {
@@ -1534,10 +1545,36 @@ img {
   }
 
   .site-footer__right {
+    width: 100%;
+    flex-direction: column;
     justify-content: center;
     font-size: 0.74rem;
-    gap: 0.35rem;
+    gap: 0.22rem;
     flex-wrap: nowrap;
+  }
+
+  .site-footer__stats {
+    justify-content: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+  }
+
+  .site-footer__verification,
+  .site-footer__verification:not(.site-footer__verification--standalone) {
+    justify-content: center;
+    padding-left: 0;
+  }
+
+  .site-footer__verification .stat-sep {
+    display: none;
+  }
+
+  .site-footer__verification .snapshot-badge {
+    min-height: 1.15rem;
+    padding: 0.05rem 0.35rem;
+    font-size: 0.61rem;
+    color: var(--muted);
+    background: transparent;
   }
 
   .stat-group--time,
@@ -1896,7 +1933,7 @@ img {
   margin-top: auto;
 }
 
-.torrent-card:has(.torrent-button--private) .torrent-card__actions {
+.torrent-card:has(.torrent-button--private, .torrent-button--private-link) .torrent-card__actions {
   grid-template-columns: 1fr 1fr;
 }
 

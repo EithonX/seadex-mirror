@@ -214,8 +214,8 @@ jobs:
           STABLE_DEPLOYMENT_URL: ${{ format('https://{0}.pages.dev', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
         run: >-
           node scripts/register-github-deployment.mjs
-          --environment "Cloudflare Primary"
+          --environment "production"
           --url "$STABLE_DEPLOYMENT_URL"
-          --description "Verified Cloudflare primary mirror"
+          --description "Verified Cloudflare primary alias"
           --snapshot "${{ steps.snapshot.outputs.snapshot-id }}"
           --fingerprint "${{ steps.snapshot.outputs.site-fingerprint }}"

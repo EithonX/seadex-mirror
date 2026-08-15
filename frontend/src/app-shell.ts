@@ -61,13 +61,19 @@ export function renderSiteFooter(status?: MirrorStatus | null) {
           ${
             status
               ? `
-                <span class="stat-group"><strong class="stat-num">${status.counts.entries.toLocaleString()}</strong> entries</span>
-                <span class="stat-sep">&bull;</span>
-                <span class="stat-group"><strong class="stat-num">${status.counts.torrents.toLocaleString()}</strong> torrents</span>
-                ${updatedDate ? `<span class="stat-sep stat-sep--time">&bull;</span><span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>` : ""}
-                ${snapshotLabel ? `<span class="stat-sep stat-sep--snapshot">&bull;</span><span class="snapshot-badge" title="Verified content snapshot ${escapeHtml(status.snapshot.id)}">Verified ${escapeHtml(snapshotLabel)}</span>` : ""}
+                <div class="site-footer__stats">
+                  <span class="stat-group"><strong class="stat-num">${status.counts.entries.toLocaleString()}</strong> entries</span>
+                  <span class="stat-sep">&bull;</span>
+                  <span class="stat-group"><strong class="stat-num">${status.counts.torrents.toLocaleString()}</strong> torrents</span>
+                  ${updatedDate ? `<span class="stat-sep stat-sep--time">&bull;</span><span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>` : ""}
+                </div>
+                ${
+                  snapshotLabel
+                    ? `<div class="site-footer__verification"><span class="stat-sep stat-sep--snapshot">&bull;</span><span class="snapshot-badge" title="Verified content snapshot ${escapeHtml(status.snapshot.id)}">Verified ${escapeHtml(snapshotLabel)}</span></div>`
+                    : ""
+                }
               `
-              : `<span class="snapshot-badge snapshot-badge--unknown" title="Freshness metadata could not be loaded. Core mirror data can still be browsed.">Snapshot status unavailable</span>`
+              : `<div class="site-footer__verification site-footer__verification--standalone"><span class="snapshot-badge snapshot-badge--unknown" title="Freshness metadata could not be loaded. Core mirror data can still be browsed.">Snapshot status unavailable</span></div>`
           }
         </div>
       </div>
