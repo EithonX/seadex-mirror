@@ -8,6 +8,7 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
   buildSnapshotId,
   buildSourceFingerprint,
+  buildWorkbookContentFingerprint,
   createSnapshotManifest,
   readSnapshotManifest,
   sha256Buffer,
@@ -152,12 +153,12 @@ async function main() {
   logStep("Fetching published SeaDex sheet workbook...");
   const sheetSnapshot = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit);
   logStep(
-    `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), SHA-256 ${sheetSnapshot.sourceSha256.slice(0, 12)}.`,
+    `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), content fingerprint ${sheetSnapshot.contentSha256.slice(0, 12)}.`,
   );
 
   const sourceFingerprint = buildSourceFingerprint({
     seaDexFingerprint: sourceSnapshot.seaDexFingerprint,
-    workbookSha256: sheetSnapshot.sourceSha256,
+    workbookContentSha256: sheetSnapshot.contentSha256,
   });
   const aniListRefreshDue = hasAniListRefreshDue(
     existingSnapshot?.aniListCache ?? new Map(),
@@ -743,9 +744,10 @@ async function fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit) {
     workbook,
     retryLimit,
   );
+  const payload = serializeSheetWorkbook(workbook, publishedRichTextLinks);
   return {
-    sourceSha256: sha256Buffer(workbookBuffer),
-    payload: serializeSheetWorkbook(workbook, publishedRichTextLinks),
+    contentSha256: buildWorkbookContentFingerprint(payload),
+    payload,
   };
 }
 

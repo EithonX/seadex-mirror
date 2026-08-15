@@ -7,6 +7,7 @@ import {
   buildSeaDexFingerprint,
   buildSnapshotId,
   buildSourceFingerprint,
+  buildWorkbookContentFingerprint,
   createSnapshotManifest,
   sha256Text,
   verifySnapshotManifest,
@@ -30,14 +31,37 @@ test("SeaDex fingerprint is order-independent for entries and detects torrent ch
   assert.notEqual(first, torrentChanged);
 });
 
-test("source fingerprint changes when workbook bytes change", () => {
-  const seaDexFingerprint = sha256Text("same-seadex");
-  assert.notEqual(
-    buildSourceFingerprint({ seaDexFingerprint, workbookSha256: sha256Text("workbook-a") }),
-    buildSourceFingerprint({ seaDexFingerprint, workbookSha256: sha256Text("workbook-b") }),
-  );
+test("workbook content fingerprint ignores generation time but detects represented changes", () => {
+  const first = buildWorkbookContentFingerprint({
+    generatedAt: "2026-08-15T00:00:00Z",
+    sheets: [{ name: "Main", rows: [["same"]] }],
+  });
+  const timestampOnly = buildWorkbookContentFingerprint({
+    generatedAt: "2026-08-16T00:00:00Z",
+    sheets: [{ name: "Main", rows: [["same"]] }],
+  });
+  const changed = buildWorkbookContentFingerprint({
+    generatedAt: "2026-08-16T00:00:00Z",
+    sheets: [{ name: "Main", rows: [["changed"]] }],
+  });
+
+  assert.equal(first, timestampOnly);
+  assert.notEqual(first, changed);
 });
 
+test("source fingerprint tracks normalized workbook content", () => {
+  const seaDexFingerprint = sha256Text("same-seadex");
+  assert.notEqual(
+    buildSourceFingerprint({
+      seaDexFingerprint,
+      workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "A" }] }),
+    }),
+    buildSourceFingerprint({
+      seaDexFingerprint,
+      workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "B" }] }),
+    }),
+  );
+});
 
 test("snapshot identity includes rendered workbook content but ignores its timestamp", () => {
   const sourceFingerprint = sha256Text("source");

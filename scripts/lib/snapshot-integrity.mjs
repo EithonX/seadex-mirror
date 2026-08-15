@@ -32,18 +32,27 @@ export function buildSeaDexFingerprint(listIds, entries) {
   return sha256Json({ listIds: normalizedIds, entries: normalizedEntries });
 }
 
-export function buildSourceFingerprint({ seaDexFingerprint, workbookSha256 }) {
-  return sha256Json({ seaDexFingerprint, workbookSha256 });
+export function buildWorkbookContentFingerprint(sheetWorkbook) {
+  return sha256Json(normalizeWorkbookContent(sheetWorkbook));
+}
+
+export function buildSourceFingerprint({ seaDexFingerprint, workbookContentSha256 }) {
+  return sha256Json({ seaDexFingerprint, workbookContentSha256 });
 }
 
 export function buildSnapshotId({ sourceFingerprint, aniListMedia, sheetWorkbook = null }) {
   const media = [...aniListMedia.entries()]
     .map(([id, value]) => [Number(id), value])
     .sort((left, right) => left[0] - right[0]);
-  const workbookContent = sheetWorkbook
-    ? Object.fromEntries(Object.entries(sheetWorkbook).filter(([key]) => key !== "generatedAt"))
-    : null;
+  const workbookContent = normalizeWorkbookContent(sheetWorkbook);
   return sha256Json({ sourceFingerprint, aniListMedia: media, sheetWorkbook: workbookContent });
+}
+
+function normalizeWorkbookContent(sheetWorkbook) {
+  if (!sheetWorkbook) {
+    return null;
+  }
+  return Object.fromEntries(Object.entries(sheetWorkbook).filter(([key]) => key !== "generatedAt"));
 }
 
 export async function createSnapshotManifest(rootDir, metadata) {
