@@ -89,9 +89,11 @@ jobs:
           set -euo pipefail
           snapshot_id="$(node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('dist/mirror-data/manifest.json','utf8')); process.stdout.write(m.snapshotId);")"
           manifest_sha="$(sha256sum dist/mirror-data/manifest.json | cut -d' ' -f1)"
+          site_fingerprint="$(node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('dist/site-build.json','utf8')); process.stdout.write(m.fingerprint);")"
           {
             echo "snapshot-id=$snapshot_id"
             echo "manifest-sha=$manifest_sha"
+            echo "site-fingerprint=$site_fingerprint"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify Cloudflare Pages access
@@ -121,6 +123,7 @@ jobs:
           DEPLOYED_SITE_URL: ${{ steps.deploy-pages.outputs.deployment-url }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
+          EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
         run: npm run verify:deployed-site
 
       - name: Verify production alias
@@ -129,4 +132,5 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
+          EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
         run: npm run verify:deployed-site

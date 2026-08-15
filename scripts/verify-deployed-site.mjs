@@ -1,14 +1,17 @@
 import { readResponseBuffer } from "./lib/http.mjs";
 import { sha256Buffer, validateSnapshotManifest } from "./lib/snapshot-integrity.mjs";
+import { validateSiteBuildDescriptor } from "./lib/site-build.mjs";
 
 const MAX_ATTEMPTS = positiveInt(process.env.DEPLOY_VERIFY_ATTEMPTS, 6);
 const RETRY_DELAY_MS = positiveInt(process.env.DEPLOY_VERIFY_DELAY_MS, 2_000);
 const REQUEST_TIMEOUT_MS = positiveInt(process.env.DEPLOY_VERIFY_TIMEOUT_MS, 15_000);
 const EXPECTED_SNAPSHOT_ID = (process.env.EXPECTED_SNAPSHOT_ID ?? "").trim();
 const EXPECTED_MANIFEST_SHA256 = (process.env.EXPECTED_MANIFEST_SHA256 ?? "").trim();
+const EXPECTED_SITE_FINGERPRINT = (process.env.EXPECTED_SITE_FINGERPRINT ?? "").trim();
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_JSON_BYTES = 64 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+const MAX_SITE_BUILD_BYTES = 512 * 1024;
 const REQUIRED_MANIFEST_PATHS = ["status.json", "catalog.json", "sheet.json", "sheet-workbook.json", "anilist-cache.json"];
 
 async function main() {
@@ -55,10 +58,37 @@ async function main() {
 
     return {
       manifest,
+      digest,
       hasCacheControl: Boolean(response.headers.get("cache-control")),
     };
   });
   console.log(`OK: manifest.json identifies snapshot ${manifestResult.manifest.snapshotId.slice(0, 12)}.`);
+
+  const siteBuild = await retryCheck("/site-build.json", async () => {
+    const response = await fetchResponse(`${baseUrl}/site-build.json`);
+    assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+    const bytes = await readResponseBuffer(response, {
+      maxBytes: MAX_SITE_BUILD_BYTES,
+      label: "deployed site-build.json",
+    });
+    const descriptor = validateSiteBuildDescriptor(parseJson(bytes.toString("utf8"), "site-build.json"));
+    assert(
+      descriptor.snapshotId === manifestResult.manifest.snapshotId,
+      "site-build.json snapshot ID differs from mirror manifest",
+    );
+    assert(
+      descriptor.mirrorManifestSha256 === manifestResult.digest,
+      "site-build.json mirror manifest digest differs from deployed manifest",
+    );
+    if (EXPECTED_SITE_FINGERPRINT) {
+      assert(
+        descriptor.fingerprint === EXPECTED_SITE_FINGERPRINT,
+        "site-build.json fingerprint differs from the built artifact",
+      );
+    }
+    return descriptor;
+  });
+  console.log(`OK: site-build.json identifies site ${siteBuild.fingerprint.slice(0, 12)}.`);
 
   const manifestByPath = new Map(manifestResult.manifest.files.map((file) => [file.path, file]));
   const samplePaths = selectVerificationSample(manifestResult.manifest.files);
@@ -172,6 +202,9 @@ function validateExpectedIdentity() {
   }
   if (EXPECTED_MANIFEST_SHA256 && !isSha256(EXPECTED_MANIFEST_SHA256)) {
     throw new Error("EXPECTED_MANIFEST_SHA256 must be a lowercase SHA-256 hex digest.");
+  }
+  if (EXPECTED_SITE_FINGERPRINT && !isSha256(EXPECTED_SITE_FINGERPRINT)) {
+    throw new Error("EXPECTED_SITE_FINGERPRINT must be a lowercase SHA-256 hex digest.");
   }
 }
 

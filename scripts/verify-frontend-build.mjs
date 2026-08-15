@@ -2,6 +2,12 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSnapshotManifest, verifySnapshotManifest } from "./lib/snapshot-integrity.mjs";
+import {
+  SITE_BUILD_FILE,
+  createSiteBuildDescriptor,
+  readSiteBuildDescriptor,
+  stableSiteBuildJson,
+} from "./lib/site-build.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distDir = join(repoRoot, "dist");
@@ -12,6 +18,7 @@ const mirrorEntriesDir = join(mirrorDataDir, "entries");
 const mirrorStatusPath = join(mirrorDataDir, "status.json");
 const mirrorCatalogPath = join(mirrorDataDir, "catalog.json");
 const mirrorSheetWorkbookPath = join(mirrorDataDir, "sheet-workbook.json");
+const siteBuildPath = join(distDir, SITE_BUILD_FILE);
 
 function fail(message) {
   console.error(`Frontend build verification failed: ${message}`);
@@ -103,6 +110,18 @@ try {
   }
 } catch (error) {
   fail(`dist mirror manifest verification failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+try {
+  const [storedSiteBuild, recomputedSiteBuild] = await Promise.all([
+    readSiteBuildDescriptor(siteBuildPath),
+    createSiteBuildDescriptor(distDir),
+  ]);
+  if (stableSiteBuildJson(storedSiteBuild) !== stableSiteBuildJson(recomputedSiteBuild)) {
+    fail("dist/site-build.json does not match the deployable site contents.");
+  }
+} catch (error) {
+  fail(`dist site build identity verification failed: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 const [indexHtml, assetEntries] = await Promise.all([

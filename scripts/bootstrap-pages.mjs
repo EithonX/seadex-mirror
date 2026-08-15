@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { runNpm } from "./lib/npm-runner.mjs";
 import { validateSnapshotManifest } from "./lib/snapshot-integrity.mjs";
+import { readSiteBuildDescriptor } from "./lib/site-build.mjs";
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DEFAULT_PROJECT_NAME = "seadex";
@@ -37,6 +38,7 @@ async function main() {
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   validateSnapshotManifest(manifest);
   const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+  const siteBuild = await readSiteBuildDescriptor(resolve(PROJECT_ROOT, "dist/site-build.json"));
 
   console.log(
     `Deploying snapshot ${manifest.snapshotId.slice(0, 12)} (${manifest.files.length} manifested files).`,
@@ -60,6 +62,7 @@ async function main() {
       CLOUDFLARE_PAGES_PROJECT_NAME: projectName,
       EXPECTED_SNAPSHOT_ID: manifest.snapshotId,
       EXPECTED_MANIFEST_SHA256: manifestSha256,
+      EXPECTED_SITE_FINGERPRINT: siteBuild.fingerprint,
     },
   });
 

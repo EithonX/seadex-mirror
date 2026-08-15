@@ -6,11 +6,9 @@ on:
       - main
     paths:
       - ".github/workflows/deploy-site.yml"
-      - ".github/workflows/rebuild-mirror.yml"
       - "frontend/**"
       - "scripts/**"
       - "shared/**"
-      - "test/**"
       - "package.json"
       - "package-lock.json"
       - "tsconfig*.json"
@@ -28,9 +26,6 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    outputs:
-      snapshot-id: ${{ steps.snapshot.outputs.snapshot-id }}
-      manifest-sha: ${{ steps.snapshot.outputs.manifest-sha }}
     steps:
       - name: Require production branch
         if: github.ref != 'refs/heads/main'
@@ -78,19 +73,37 @@ jobs:
       - name: Check Cloudflare Pages limits
         run: npm run verify:pages-limits
 
-      - name: Read snapshot identity
+      - name: Read deployment identity
         id: snapshot
         shell: bash
         run: |
           set -euo pipefail
           snapshot_id="$(node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('dist/mirror-data/manifest.json','utf8')); process.stdout.write(m.snapshotId);")"
           manifest_sha="$(sha256sum dist/mirror-data/manifest.json | cut -d' ' -f1)"
+          site_fingerprint="$(node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('dist/site-build.json','utf8')); process.stdout.write(m.fingerprint);")"
           {
             echo "snapshot-id=$snapshot_id"
             echo "manifest-sha=$manifest_sha"
+            echo "site-fingerprint=$site_fingerprint"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Check whether production output changed
+        id: site-change
+        shell: bash
+        env:
+          SITE_BASE_URL: ${{ format('https://{0}.pages.dev', secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex') }}
+        run: |
+          set -euo pipefail
+          node scripts/check-site-deployment.mjs --report .site-deploy-report.json
+          deploy="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync('.site-deploy-report.json','utf8')); process.stdout.write(String(Boolean(r.deploy)));")"
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unchanged deployment
+        if: steps.site-change.outputs.deploy != 'true'
+        run: echo "Built site is byte-identical to verified production; skipping Cloudflare deployment."
+
       - name: Verify Cloudflare Pages access
+        if: steps.site-change.outputs.deploy == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -98,6 +111,7 @@ jobs:
         run: node scripts/verify-cloudflare.mjs
 
       - name: Deploy Pages site
+        if: steps.site-change.outputs.deploy == 'true'
         id: deploy-pages
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         env:
@@ -110,15 +124,19 @@ jobs:
           command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=main --commit-dirty=true
 
       - name: Verify exact Pages deployment
+        if: steps.site-change.outputs.deploy == 'true'
         env:
           DEPLOYED_SITE_URL: ${{ steps.deploy-pages.outputs.deployment-url }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
+          EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
         run: npm run verify:deployed-site
 
       - name: Verify production alias
+        if: steps.site-change.outputs.deploy == 'true'
         env:
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME || vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'seadex' }}
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
+          EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
         run: npm run verify:deployed-site
