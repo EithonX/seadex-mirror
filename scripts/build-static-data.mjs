@@ -2,7 +2,7 @@ import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promise
 import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
-import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer } from "./lib/http.mjs";
+import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer, readTextResponse } from "./lib/http.mjs";
 import { fetchConsistentSeaDexSnapshot } from "./lib/seadex-source.mjs";
 import {
   SNAPSHOT_SCHEMA_VERSION,
