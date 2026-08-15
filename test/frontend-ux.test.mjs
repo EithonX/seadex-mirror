@@ -4,14 +4,15 @@ import test from "node:test";
 
 const normalizeNewlines = (value) => value.replace(/\r\n?/gu, "\n");
 
-test("private tracker URLs are rendered as real actions when SeaDex provides them", async () => {
+test("private tracker actions use tracker-aware source resolution and stay clickable when resolvable", async () => {
   const source = normalizeNewlines(await readFile(new URL("../frontend/src/entry-page.ts", import.meta.url), "utf8"));
 
-  assert.match(source, /const privateUrl = candidates\.find\(\(url\) => isPrivateTrackerUrl\(url\)\) \?\? null;/u);
-  assert.match(source, /privateUrl,\n\s+publicLabel:/u);
+  assert.match(source, /resolveSeaDexTorrentActionUrl\(torrent, preferGrouped\)/u);
+  assert.match(source, /const trackerIsPrivate = isSeaDexPrivateTracker\(torrent\.tracker\);/u);
+  assert.match(source, /privateUrl: trackerIsPrivate \? resolvedUrl : null,/u);
   assert.match(source, /if \(links\.privateUrl\) \{[\s\S]*?href: links\.privateUrl,[\s\S]*?isPrivate: true,/u);
   assert.match(source, /const buttonClass = action\.isPrivate \? "torrent-button torrent-button--private-link" : "torrent-button";/u);
-  assert.match(source, /const icon = action\.isPrivate[\s\S]*?renderPrivateTrackerIcon\(\)/u);
+  assert.doesNotMatch(source, /isPrivateTrackerUrl/u);
 });
 
 test("mobile footer keeps statistics together and moves snapshot verification to its own row", async () => {

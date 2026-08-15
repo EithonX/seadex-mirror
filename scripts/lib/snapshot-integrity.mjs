@@ -4,7 +4,7 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
 export const SNAPSHOT_MANIFEST_SCHEMA_VERSION = 1;
-export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SNAPSHOT_SCHEMA_VERSION = 4;
 export const SOURCE_REVISION_SCHEMA_VERSION = 1;
 export const SNAPSHOT_MANIFEST_FILE = "manifest.json";
 
@@ -135,7 +135,7 @@ export function buildSnapshotId({ sourceFingerprint, aniListMedia, sheetWorkbook
     .map(([id, value]) => [Number(id), value])
     .sort((left, right) => left[0] - right[0]);
   const workbookContent = normalizeWorkbookContent(sheetWorkbook);
-  return sha256Json({ sourceFingerprint, aniListMedia: media, sheetWorkbook: workbookContent });
+  return sha256Json({ schemaVersion: SNAPSHOT_SCHEMA_VERSION, sourceFingerprint, aniListMedia: media, sheetWorkbook: workbookContent });
 }
 
 function normalizeWorkbookContent(sheetWorkbook) {

@@ -1,4 +1,5 @@
 import type { EntryPayload } from "../../shared/mirror";
+import { isSeaDexPrivateTracker, resolveSeaDexTorrentActionUrl } from "../../shared/tracker-links.mjs";
 import {
   capitalize,
   formatBytes,
@@ -562,32 +563,15 @@ function renderRelationChip(label: string) {
 }
 
 function classifyTorrentLinks(torrent: EntryPayload["torrents"][number], preferGrouped = false) {
-  const candidates = (
-    preferGrouped
-      ? [torrent.groupedUrl, torrent.sourceGroupedUrl, torrent.url, torrent.sourceUrl]
-      : [torrent.url, torrent.sourceUrl, torrent.groupedUrl, torrent.sourceGroupedUrl]
-  ).filter(Boolean)
-    .map((url) => safeExternalUrl(url, TORRENT_LINK_PROTOCOLS))
-    .filter((url): url is string => Boolean(url));
-  const publicUrl = candidates.find((url) => !isPrivateTrackerUrl(url)) ?? null;
-  const privateUrl = candidates.find((url) => isPrivateTrackerUrl(url)) ?? null;
-  const trackerIsPrivate = isPrivateTrackerName(torrent.tracker);
+  const trackerIsPrivate = isSeaDexPrivateTracker(torrent.tracker);
+  const resolvedUrl = resolveSeaDexTorrentActionUrl(torrent, preferGrouped);
 
   return {
-    publicUrl,
-    privateUrl,
-    publicLabel: publicUrl ? renderTrackerLabel(publicUrl) : "Public",
-    hasPrivate: Boolean(privateUrl || trackerIsPrivate),
+    publicUrl: trackerIsPrivate ? null : resolvedUrl,
+    privateUrl: trackerIsPrivate ? resolvedUrl : null,
+    publicLabel: !trackerIsPrivate && resolvedUrl ? renderTrackerLabel(resolvedUrl) : "Public",
+    hasPrivate: trackerIsPrivate,
   };
-}
-
-function isPrivateTrackerUrl(url: string) {
-  return /\/torrents\.php\?/i.test(url) || /releases\.moe\/torrents\.php/i.test(url);
-}
-
-function isPrivateTrackerName(tracker: string | null | undefined) {
-  const normalized = (tracker ?? "").trim();
-  return normalized === "AB" || normalized === "OtherPrivate";
 }
 
 function sortTorrentsLikeUpstream(torrents: EntryPayload["torrents"]) {

@@ -1,6 +1,7 @@
 import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
+import { resolveSeaDexTorrentUrl } from "../shared/tracker-links.mjs";
 import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
 import { HttpRequestError, fetchWithRetry, readJsonResponse, readResponseBuffer, readTextResponse } from "./lib/http.mjs";
 import {
@@ -145,10 +146,12 @@ async function main() {
   const existingSnapshot = localSnapshot ?? remoteSnapshot;
 
   const storedSourceRevision = getStoredSourceRevision(existingSnapshot);
+  const existingSnapshotSchemaCurrent = isCurrentSnapshotSchema(existingSnapshot);
   const needsLocalMaterialization = onUnchanged === "materialize" && !localSnapshot;
   const canFastSkip =
     !force &&
     Boolean(existingSnapshot) &&
+    existingSnapshotSchemaCurrent &&
     Boolean(storedSourceRevision) &&
     !needsLocalMaterialization;
 
@@ -184,6 +187,11 @@ async function main() {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
+  } else if (!force && existingSnapshot && !existingSnapshotSchemaCurrent) {
+    const previousSchema = Number(existingSnapshot?.status?.snapshot?.schemaVersion ?? 0);
+    logStep(
+      `The previous snapshot uses schema v${previousSchema || "unknown"}; one full capture will migrate it to v${SNAPSHOT_SCHEMA_VERSION}.`,
+    );
   } else if (!force && existingSnapshot && !storedSourceRevision) {
     logStep("The previous snapshot has no compatible source guard metadata; one full capture will migrate it.");
   }
@@ -228,6 +236,7 @@ async function main() {
   );
   const upstreamUnchanged =
     !force &&
+    existingSnapshotSchemaCurrent &&
     shouldSkipRebuild(existingSnapshot, sourceFingerprint) &&
     sourceRevisionMatches(storedSourceRevision, sourceRevision) &&
     !aniListRefreshDue;
@@ -496,7 +505,7 @@ async function loadLocalSnapshot(outputDir) {
     const hasManifest = await pathExists(manifestPath);
     const snapshotSchemaVersion = Number(status?.snapshot?.schemaVersion ?? 0);
     if (Number.isInteger(snapshotSchemaVersion) && snapshotSchemaVersion >= 3 && !hasManifest) {
-      throw new Error("Local schema-v3 snapshot is missing manifest.json.");
+      throw new Error(`Local schema-v${snapshotSchemaVersion} snapshot is missing manifest.json.`);
     }
     if (hasManifest) {
       const manifest = await readSnapshotManifest(outputDir);
@@ -639,6 +648,10 @@ function validateSnapshotSourceRevisionForReuse(status) {
   if (Number.isInteger(schemaVersion) && schemaVersion >= 3) {
     validateSourceRevision(status?.snapshot?.sourceRevision);
   }
+}
+
+function isCurrentSnapshotSchema(existingSnapshot) {
+  return Number(existingSnapshot?.status?.snapshot?.schemaVersion ?? 0) === SNAPSHOT_SCHEMA_VERSION;
 }
 
 function getStoredSourceRevision(existingSnapshot) {
@@ -864,9 +877,9 @@ function buildStaticSnapshot(snapshot) {
           releaseGroup: torrent.releaseGroup ?? "",
           tracker: torrent.tracker ?? "",
           sourceUrl: torrent.url ?? null,
-          url: resolveSourceUrl(snapshot.sourceBaseUrl, torrent.url ?? "") || null,
+          url: resolveSeaDexTorrentUrl(torrent.tracker, torrent.url) ?? null,
           sourceGroupedUrl: torrent.groupedUrl ?? null,
-          groupedUrl: resolveSourceUrl(snapshot.sourceBaseUrl, torrent.groupedUrl ?? "") || null,
+          groupedUrl: resolveSeaDexTorrentUrl(torrent.tracker, torrent.groupedUrl) ?? null,
           infoHash: torrent.infoHash ?? null,
           dualAudio: torrent.dualAudio === true,
           isBest: torrent.isBest === true,
@@ -1978,10 +1991,6 @@ async function fetchAniListBatch(endpoint, ids, accessToken, retryLimit) {
     throw new Error(message);
   }
   return Array.isArray(payload.data?.Page?.media) ? payload.data.Page.media : [];
-}
-
-function resolveSourceUrl(sourceBaseUrl, value) {
-  return sanitizeExternalUrl(value, sourceBaseUrl, new Set(["https:", "http:", "magnet:"])) ?? "";
 }
 
 function requireHttpUrl(value, label) {

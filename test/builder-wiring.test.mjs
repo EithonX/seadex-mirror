@@ -17,6 +17,11 @@ const MODULES = [
     path: new URL("../scripts/lib/seadex-source.mjs", import.meta.url),
     specifier: "./lib/seadex-source.mjs",
   },
+  {
+    label: "tracker-links",
+    path: new URL("../shared/tracker-links.mjs", import.meta.url),
+    specifier: "../shared/tracker-links.mjs",
+  },
 ];
 
 for (const module of MODULES) {
