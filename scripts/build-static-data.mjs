@@ -1,16 +1,34 @@
-import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
+import { replaceDirectoryAtomically, pathExists } from "./lib/atomic-directory.mjs";
+import { fetchWithRetry, readJsonResponse, readResponseBuffer, readTextResponse } from "./lib/http.mjs";
+import { validateSeaDexSnapshot } from "./lib/source-integrity.mjs";
+import {
+  SNAPSHOT_SCHEMA_VERSION,
+  buildSeaDexFingerprint,
+  buildSnapshotId,
+  buildSourceFingerprint,
+  createSnapshotManifest,
+  readSnapshotManifest,
+  sha256Buffer,
+  validateSnapshotManifest,
+  verifySnapshotManifest,
+} from "./lib/snapshot-integrity.mjs";
 
 const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const DEFAULT_SHEET_WORKBOOK_URL =
   "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/export?format=xlsx";
 const DEFAULT_SOURCE_PAGE_SIZE = 100;
-const DEFAULT_SOURCE_PROBE_SIZE = 8;
 const DEFAULT_ANILIST_BATCH_SIZE = 50;
 const DEFAULT_ANILIST_DELAY_MS = 2200;
-const DEFAULT_RETRY_LIMIT = 5;
+const DEFAULT_RETRY_LIMIT = 4;
+const DEFAULT_ANILIST_CACHE_TTL_HOURS = 168;
+const DEFAULT_SOURCE_STABILITY_PASSES = 2;
+const MAX_SOURCE_JSON_BYTES = 32 * 1024 * 1024;
+const MAX_WORKBOOK_BYTES = 64 * 1024 * 1024;
+const MAX_PUBLISHED_SHEET_HTML_BYTES = 16 * 1024 * 1024;
 const DEFAULT_OUTPUT_DIR = "frontend/public/mirror-data";
 const DEFAULT_ON_UNCHANGED = "skip";
 const PROGRESS_PREFIX = "[mirror-build]";
@@ -76,19 +94,35 @@ const ANILIST_MEDIA_QUERY = `
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const sourceBaseUrl = args.source ?? process.env.SOURCE_BASE_URL ?? DEFAULT_SOURCE_BASE_URL;
-  const anilistUrl = args.anilist ?? process.env.ANILIST_GRAPHQL_URL ?? DEFAULT_ANILIST_GRAPHQL_URL;
+  const sourceBaseUrl = requireHttpUrl(
+    args.source ?? process.env.SOURCE_BASE_URL ?? DEFAULT_SOURCE_BASE_URL,
+    "SeaDex source URL",
+  );
+  const anilistUrl = requireHttpUrl(
+    args.anilist ?? process.env.ANILIST_GRAPHQL_URL ?? DEFAULT_ANILIST_GRAPHQL_URL,
+    "AniList GraphQL URL",
+  );
   const pageSize = parsePositiveInt(args.pageSize, DEFAULT_SOURCE_PAGE_SIZE);
-  const probeSize = parsePositiveInt(args.probeSize, DEFAULT_SOURCE_PROBE_SIZE);
   const anilistBatchSize = parsePositiveInt(args.batchSize, DEFAULT_ANILIST_BATCH_SIZE);
-  const anilistDelayMs = parsePositiveInt(args.delayMs, DEFAULT_ANILIST_DELAY_MS);
-  const retryLimit = parsePositiveInt(args.retryLimit, DEFAULT_RETRY_LIMIT);
+  const anilistDelayMs = parseNonNegativeInt(args.delayMs, DEFAULT_ANILIST_DELAY_MS);
+  const retryLimit = parseNonNegativeInt(args.retryLimit, DEFAULT_RETRY_LIMIT);
+  const anilistCacheTtlHours = parsePositiveInt(
+    args.anilistCacheTtlHours ?? process.env.ANILIST_CACHE_TTL_HOURS,
+    DEFAULT_ANILIST_CACHE_TTL_HOURS,
+  );
+  const sourceStabilityPasses = Math.max(
+    2,
+    parsePositiveInt(args.sourceStabilityPasses, DEFAULT_SOURCE_STABILITY_PASSES),
+  );
   const anilistAccessToken = args.anilistToken ?? process.env.ANILIST_ACCESS_TOKEN ?? "";
   const anilistClientId = args.anilistClientId ?? process.env.ANILIST_CLIENT_ID ?? "";
   const anilistClientSecret = args.anilistClientSecret ?? process.env.ANILIST_CLIENT_SECRET ?? "";
-  const statusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
-  const sheetWorkbookUrl =
-    args.sheetWorkbookUrl ?? process.env.SHEET_WORKBOOK_URL ?? DEFAULT_SHEET_WORKBOOK_URL;
+  const rawStatusUrl = args.statusUrl ?? process.env.MIRROR_STATUS_URL ?? "";
+  const statusUrl = rawStatusUrl ? requireHttpUrl(rawStatusUrl, "Mirror status URL") : "";
+  const sheetWorkbookUrl = requireHttpUrl(
+    args.sheetWorkbookUrl ?? process.env.SHEET_WORKBOOK_URL ?? DEFAULT_SHEET_WORKBOOK_URL,
+    "Sheet workbook URL",
+  );
   const outputDir = resolve(args.out ?? DEFAULT_OUTPUT_DIR);
   const reportPath = args.report ? resolve(args.report) : "";
   const force = args.force === "true";
@@ -100,17 +134,38 @@ async function main() {
 
   const startedAt = new Date().toISOString();
   const localSnapshot = await loadLocalSnapshot(outputDir);
-  const remoteSnapshot = localSnapshot ? null : await loadRemoteStatus(statusUrl);
+  const remoteSnapshot = localSnapshot ? null : await loadRemoteStatus(statusUrl, retryLimit);
   const existingSnapshot = localSnapshot ?? remoteSnapshot;
-  logStep("Fetching SeaDex list IDs...");
-  const listIds = await fetchListIds(sourceBaseUrl);
-  logStep(`Fetched ${listIds.length} list IDs.`);
-  logStep(`Fetching upstream probe (${probeSize} recent rows)...`);
-  const sourceProbe = await fetchSourceProbe(sourceBaseUrl, probeSize);
-  const probeSignature = buildProbeSignature(listIds, sourceProbe.items);
-  logStep(`Computed upstream probe signature from ${sourceProbe.items.length} rows.`);
 
-  const upstreamUnchanged = !force && shouldSkipRebuild(existingSnapshot, probeSignature);
+  logStep(`Fetching a stable SeaDex snapshot (${sourceStabilityPasses} matching pass(es) required)...`);
+  const sourceSnapshot = await fetchStableSourceSnapshot(
+    sourceBaseUrl,
+    pageSize,
+    sourceStabilityPasses,
+    retryLimit,
+  );
+  logStep(
+    `Stable SeaDex snapshot confirmed: ${sourceSnapshot.entries.length} entries, fingerprint ${sourceSnapshot.seaDexFingerprint.slice(0, 12)}.`,
+  );
+
+  logStep("Fetching published SeaDex sheet workbook...");
+  const sheetSnapshot = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit);
+  logStep(
+    `Workbook snapshot ready with ${sheetSnapshot.payload.sheets.length} tab(s), SHA-256 ${sheetSnapshot.sourceSha256.slice(0, 12)}.`,
+  );
+
+  const sourceFingerprint = buildSourceFingerprint({
+    seaDexFingerprint: sourceSnapshot.seaDexFingerprint,
+    workbookSha256: sheetSnapshot.sourceSha256,
+  });
+  const aniListRefreshDue = hasAniListRefreshDue(
+    existingSnapshot?.aniListCache ?? new Map(),
+    sourceSnapshot.entries.map((entry) => entry.alID),
+    anilistCacheTtlHours,
+    refreshAniList,
+  );
+  const upstreamUnchanged =
+    !force && shouldSkipRebuild(existingSnapshot, sourceFingerprint) && !aniListRefreshDue;
   const shouldMaterializeSnapshot = upstreamUnchanged && onUnchanged === "materialize" && !localSnapshot;
 
   if (upstreamUnchanged && !shouldMaterializeSnapshot) {
@@ -118,16 +173,18 @@ async function main() {
       action: "skipped",
       mode: "static-snapshot",
       skipped: true,
-      reason: "upstream-unchanged",
+      reason: "authoritative-source-unchanged",
       sourceBaseUrl,
       startedAt,
       finishedAt: new Date().toISOString(),
-      probeSignature,
+      sourceFingerprint,
+      snapshotId: existingSnapshot?.status?.snapshot?.id ?? null,
       snapshotSource: existingSnapshot?.origin ?? null,
       localSnapshotReady: Boolean(localSnapshot),
       onUnchanged,
       entries: existingSnapshot?.status?.counts?.entries ?? null,
       torrents: existingSnapshot?.status?.counts?.torrents ?? null,
+      aniListCacheRefreshDue: false,
     };
     await writeOptionalReport(reportPath, report);
     console.log(JSON.stringify(report, null, 2));
@@ -136,21 +193,14 @@ async function main() {
 
   if (shouldMaterializeSnapshot) {
     logStep(
-      `Upstream is unchanged, but local mirror data is unavailable. Materializing a local snapshot using the ${existingSnapshot?.origin ?? "available"} cache.`,
+      `Authoritative inputs are unchanged, but local mirror data is unavailable. Reconstructing the known snapshot using the ${existingSnapshot?.origin ?? "available"} AniList cache.`,
     );
   }
 
-  logStep("Fetching full SeaDex entry snapshot...");
-  const sourceSnapshot = await fetchSourceSnapshot(sourceBaseUrl, pageSize);
-  logStep(`Fetched ${sourceSnapshot.entries.length} deduplicated entries.`);
-
-  validateSourceSnapshot(listIds, sourceSnapshot.entries);
-  logStep("Source parity checks passed.");
-
   logStep(
-    `Fetching AniList metadata for ${sourceSnapshot.entries.length} entries in batches of ${anilistBatchSize} with ${anilistDelayMs}ms pacing...`,
+    `Resolving AniList metadata for ${sourceSnapshot.entries.length} entries in batches of ${anilistBatchSize} with ${anilistDelayMs}ms pacing...`,
   );
-  const anilistMedia = await fetchAniListSnapshot(
+  const anilistResult = await fetchAniListSnapshot(
     anilistUrl,
     sourceSnapshot.entries.map((entry) => entry.alID),
     anilistBatchSize,
@@ -159,39 +209,55 @@ async function main() {
     anilistAccessToken,
     existingSnapshot?.aniListCache ?? new Map(),
     refreshAniList,
+    anilistCacheTtlHours,
   );
-  logStep(`Resolved AniList metadata for ${anilistMedia.size} entries.`);
+  logStep(
+    `AniList metadata ready for ${anilistResult.media.size} entries (${anilistResult.stats.reusedFresh} fresh cache, ${anilistResult.stats.fetched} refreshed, ${anilistResult.stats.staleFallback} stale fallback).`,
+  );
 
-  logStep("Fetching published SeaDex sheet workbook...");
-  const sheetWorkbook = await fetchSheetWorkbookSnapshot(sheetWorkbookUrl);
-  logStep(`Workbook snapshot ready with ${sheetWorkbook.sheets.length} tab(s).`);
+  const priorStartedAt = existingSnapshot?.status?.sync?.lastRebuildStartedAt ?? null;
+  const priorFinishedAt = existingSnapshot?.status?.sync?.lastRebuildFinishedAt ?? null;
+  const effectiveStartedAt = shouldMaterializeSnapshot && priorStartedAt ? priorStartedAt : startedAt;
+  const finishedAt =
+    shouldMaterializeSnapshot && priorFinishedAt ? priorFinishedAt : new Date().toISOString();
+  const snapshotId = buildSnapshotId({
+    sourceFingerprint,
+    aniListMedia: anilistResult.media,
+    sheetWorkbook: sheetSnapshot.payload,
+  });
+  sheetSnapshot.payload.generatedAt = finishedAt;
 
-  const finishedAt = new Date().toISOString();
-  logStep("Composing static snapshot payloads...");
+  logStep(`Composing static snapshot ${snapshotId.slice(0, 12)}...`);
   const snapshot = buildStaticSnapshot({
     sourceBaseUrl,
-    startedAt,
+    startedAt: effectiveStartedAt,
     finishedAt,
-    listIds,
+    listIds: sourceSnapshot.listIds,
     entries: sourceSnapshot.entries,
-    anilistMedia,
-    sheetWorkbook,
-    sourceProbe,
-    probeSignature,
+    anilistMedia: anilistResult.media,
+    anilistCache: anilistResult.cache,
+    anilistStats: anilistResult.stats,
+    sheetWorkbook: sheetSnapshot.payload,
+    sourceFingerprint,
+    snapshotId,
   });
 
   logStep(`Writing snapshot files to ${outputDir}...`);
-  await writeSnapshot(outputDir, snapshot);
-  logStep("Snapshot files written successfully.");
+  const manifest = await writeSnapshot(outputDir, snapshot);
+  logStep(
+    `Snapshot files written and hashed successfully (${manifest.totals.files} files, ${formatBytes(manifest.totals.bytes)}).`,
+  );
 
   const report = {
     action: shouldMaterializeSnapshot ? "materialized" : "rebuilt",
     mode: "static-snapshot",
     skipped: false,
     sourceBaseUrl,
-    startedAt,
+    startedAt: effectiveStartedAt,
     finishedAt,
     outputDir,
+    snapshotId,
+    sourceFingerprint,
     snapshotSource: existingSnapshot?.origin ?? null,
     localSnapshotReady: true,
     onUnchanged,
@@ -199,12 +265,14 @@ async function main() {
     entryFiles: snapshot.catalog.items.length,
     torrents: snapshot.status.counts.torrents,
     anilistMedia: snapshot.status.counts.anilistMedia,
+    anilistCache: anilistResult.stats,
     sheetTabs: snapshot.sheetWorkbook.sheets.length,
+    manifestFiles: manifest.totals.files,
+    manifestBytes: manifest.totals.bytes,
   };
   await writeOptionalReport(reportPath, report);
   console.log(JSON.stringify(report, null, 2));
 }
-
 async function loadLocalSnapshot(outputDir) {
   try {
     const statusPath = join(outputDir, "status.json");
@@ -214,14 +282,16 @@ async function loadLocalSnapshot(outputDir) {
     const cachePath = join(outputDir, "anilist-cache.json");
     const entriesDir = join(outputDir, "entries");
 
-    await access(statusPath);
-    await access(catalogPath);
-    await access(sheetPath);
-    await access(sheetWorkbookPath);
-    await access(cachePath);
-    await access(entriesDir);
+    await Promise.all([
+      access(statusPath),
+      access(catalogPath),
+      access(sheetPath),
+      access(sheetWorkbookPath),
+      access(cachePath),
+      access(entriesDir),
+    ]);
 
-    const [statusText, _catalogText, _sheetText, workbookText, cacheText, entryFiles] = await Promise.all([
+    const [statusText, catalogText, sheetText, workbookText, cacheText, entryFiles] = await Promise.all([
       readFile(statusPath, "utf8"),
       readFile(catalogPath, "utf8"),
       readFile(sheetPath, "utf8"),
@@ -231,18 +301,17 @@ async function loadLocalSnapshot(outputDir) {
     ]);
 
     const status = JSON.parse(statusText);
-    JSON.parse(_catalogText);
-    JSON.parse(_sheetText);
+    JSON.parse(catalogText);
+    JSON.parse(sheetText);
     JSON.parse(workbookText);
     const cachePayload = JSON.parse(cacheText);
     const expectedEntries = status?.counts?.entries;
     const actualEntryFiles = entryFiles.filter((file) => file.endsWith(".json")).length;
 
     if (!Number.isInteger(expectedEntries) || expectedEntries < 0) {
-      console.warn(`${PROGRESS_PREFIX} Local snapshot is missing a valid entry count in status.json. Ignoring local output.`);
+      console.warn(`${PROGRESS_PREFIX} Local snapshot has no valid entry count. Ignoring local output.`);
       return null;
     }
-
     if (actualEntryFiles !== expectedEntries) {
       console.warn(
         `${PROGRESS_PREFIX} Local snapshot entry count mismatch (${actualEntryFiles} files vs ${expectedEntries} expected). Ignoring local output.`,
@@ -250,70 +319,137 @@ async function loadLocalSnapshot(outputDir) {
       return null;
     }
 
+    if (await pathExists(join(outputDir, "manifest.json"))) {
+      const manifest = await readSnapshotManifest(outputDir);
+      const verification = await verifySnapshotManifest(outputDir, manifest);
+      if (status?.snapshot?.id && verification.snapshotId !== status.snapshot.id) {
+        throw new Error("Local snapshot manifest ID does not match status.json.");
+      }
+    }
+
     return {
       origin: "local",
       status,
       aniListCache: buildAniListCacheMap(cachePayload),
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn(`${PROGRESS_PREFIX} Ignoring unusable local snapshot: ${error.message}`);
+    }
     return null;
   }
 }
 
-async function loadRemoteStatus(statusUrl) {
+async function loadRemoteStatus(statusUrl, retryLimit) {
   if (!statusUrl) {
     return null;
   }
 
   try {
-    const response = await fetch(statusUrl, {
-      headers: { accept: "application/json" },
+    const manifestUrl = new URL("manifest.json", statusUrl).toString();
+    const manifestResponse = await fetchWithRetry(
+      manifestUrl,
+      { headers: { accept: "application/json" } },
+      { retries: retryLimit, label: "Remote snapshot manifest" },
+    );
+    const manifest = await readJsonResponse(manifestResponse, {
+      maxBytes: 4 * 1024 * 1024,
+      label: "Remote snapshot manifest",
     });
-    if (!response.ok) {
-      return null;
-    }
+    validateSnapshotManifest(manifest);
 
-    const status = await response.json();
-    const cacheUrl = new URL("anilist-cache.json", statusUrl).toString();
+    const [statusBytes, cacheBytes] = await Promise.all([
+      fetchManifestedRemoteFile(statusUrl, manifest, "status.json", 2 * 1024 * 1024, retryLimit),
+      fetchManifestedRemoteFile(
+        new URL("anilist-cache.json", statusUrl).toString(),
+        manifest,
+        "anilist-cache.json",
+        32 * 1024 * 1024,
+        retryLimit,
+      ),
+    ]);
+    const status = JSON.parse(statusBytes.toString("utf8"));
+    const cachePayload = JSON.parse(cacheBytes.toString("utf8"));
+
+    if (status?.snapshot?.id !== manifest.snapshotId) {
+      throw new Error("Remote status snapshot ID does not match manifest.json.");
+    }
+    if (status?.snapshot?.sourceFingerprint !== manifest.sourceFingerprint) {
+      throw new Error("Remote status source fingerprint does not match manifest.json.");
+    }
 
     return {
       origin: "remote",
       status,
-      aniListCache: await loadRemoteAniListCache(cacheUrl),
+      aniListCache: buildAniListCacheMap(cachePayload),
     };
-  } catch {
+  } catch (error) {
+    console.warn(`${PROGRESS_PREFIX} Could not reuse the remote snapshot cache: ${errorMessage(error)}`);
     return null;
   }
 }
 
-async function loadRemoteAniListCache(cacheUrl) {
-  try {
-    const response = await fetch(cacheUrl, {
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) {
-      return new Map();
-    }
-
-    return buildAniListCacheMap(await response.json());
-  } catch {
-    return new Map();
+async function fetchManifestedRemoteFile(url, manifest, path, maxBytes, retryLimit) {
+  const record = manifest.files.find((file) => file.path === path);
+  if (!record) {
+    throw new Error(`Remote snapshot manifest is missing ${path}.`);
   }
+  if (record.bytes > maxBytes) {
+    throw new Error(`Remote ${path} is ${record.bytes} bytes, above its ${maxBytes}-byte safety limit.`);
+  }
+
+  const response = await fetchWithRetry(
+    url,
+    { headers: { accept: "application/json", "cache-control": "no-cache" } },
+    { retries: retryLimit, label: `Remote snapshot ${path}` },
+  );
+  const bytes = await readResponseBuffer(response, { maxBytes: record.bytes + 1, label: `Remote snapshot ${path}` });
+  if (bytes.length !== record.bytes) {
+    throw new Error(`Remote ${path} byte count does not match manifest.json.`);
+  }
+  if (sha256Buffer(bytes) !== record.sha256) {
+    throw new Error(`Remote ${path} SHA-256 does not match manifest.json.`);
+  }
+  return bytes;
 }
 
 function buildAniListCacheMap(payload) {
-  return new Map(
-    Array.isArray(payload?.items)
-      ? payload.items
-          .filter((item) => Number.isInteger(item?.id) && item.id > 0)
-          .map((item) => [item.id, item])
-      : [],
-  );
+  const cache = new Map();
+
+  for (const item of Array.isArray(payload?.items) ? payload.items : []) {
+    const isVersionedRecord = item?.media && typeof item.media === "object";
+    const media = isVersionedRecord ? item.media : item;
+    const id = Number(media?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      continue;
+    }
+
+    // Legacy cache rows had no per-record freshness metadata. Deliberately mark them
+    // stale so the first build after this migration attempts one real refresh. If
+    // AniList is unavailable, fetchAniListSnapshot still retains the legacy media.
+    const fetchedAt = isVersionedRecord && isValidDateString(item?.fetchedAt) ? item.fetchedAt : null;
+    cache.set(id, { media, fetchedAt });
+  }
+
+  return cache;
 }
 
-function shouldSkipRebuild(existingSnapshot, nextProbeSignature) {
-  const previousSignature = existingSnapshot?.status?.sync?.summary?.upstreamProbe?.signature ?? null;
-  return Boolean(previousSignature && previousSignature === nextProbeSignature);
+function shouldSkipRebuild(existingSnapshot, nextSourceFingerprint) {
+  const previousFingerprint = existingSnapshot?.status?.snapshot?.sourceFingerprint ?? null;
+  return Boolean(previousFingerprint && previousFingerprint === nextSourceFingerprint);
+}
+
+function hasAniListRefreshDue(existingCache, ids, ttlHours, forceRefresh) {
+  if (forceRefresh) {
+    return true;
+  }
+  const cutoff = Date.now() - ttlHours * 60 * 60 * 1000;
+  return ids.some((id) => !isFreshCacheRecord(existingCache.get(id), cutoff));
+}
+
+function isFreshCacheRecord(record, cutoffMs) {
+  const fetchedMs = Date.parse(record?.fetchedAt ?? "");
+  return Boolean(record?.media && Number.isFinite(fetchedMs) && fetchedMs >= cutoffMs);
 }
 
 function warnAniListCredentialMode(accessToken, clientId, clientSecret) {
@@ -336,11 +472,9 @@ async function writeSnapshot(outputDir, snapshot) {
   const parentDir = dirname(outputDir);
   const outputName = basename(outputDir);
   const stagedDir = join(parentDir, `.${outputName}.tmp-${process.pid}-${Date.now()}`);
-  const backupDir = join(parentDir, `.${outputName}.bak-${process.pid}-${Date.now()}`);
   const entriesDir = join(stagedDir, "entries");
 
   await rm(stagedDir, { recursive: true, force: true });
-  await rm(backupDir, { recursive: true, force: true });
   await mkdir(entriesDir, { recursive: true });
 
   await writeJson(join(stagedDir, "status.json"), snapshot.status);
@@ -348,13 +482,19 @@ async function writeSnapshot(outputDir, snapshot) {
   await writeJson(join(stagedDir, "sheet.json"), snapshot.sheet);
   await writeJson(join(stagedDir, "sheet-workbook.json"), snapshot.sheetWorkbook);
   await writeJson(join(stagedDir, "anilist-cache.json"), {
+    schemaVersion: 2,
     generatedAt: snapshot.status.sync.lastRebuildFinishedAt,
-    items: [...snapshot.anilistCache.values()],
+    items: [...snapshot.anilistCache.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, record]) => ({
+        fetchedAt: record.fetchedAt,
+        media: record.media,
+      })),
   });
 
   let written = 0;
   const total = snapshot.entries.size;
-  for (const [alId, payload] of snapshot.entries) {
+  for (const [alId, payload] of [...snapshot.entries.entries()].sort(([left], [right]) => left - right)) {
     await writeJson(join(entriesDir, `${alId}.json`), payload);
     written += 1;
     if (written % 250 === 0 || written === total) {
@@ -362,32 +502,15 @@ async function writeSnapshot(outputDir, snapshot) {
     }
   }
 
-  let backupCreated = false;
-
-  try {
-    if (await pathExists(outputDir)) {
-      await rename(outputDir, backupDir);
-      backupCreated = true;
-    }
-
-    await rename(stagedDir, outputDir);
-
-    if (backupCreated) {
-      await rm(backupDir, { recursive: true, force: true });
-    }
-  } catch (error) {
-    await rm(stagedDir, { recursive: true, force: true });
-
-    if (!(await pathExists(outputDir)) && backupCreated && (await pathExists(backupDir))) {
-      try {
-        await rename(backupDir, outputDir);
-      } catch {
-        console.warn(`${PROGRESS_PREFIX} Failed to restore the previous snapshot after a write error.`);
-      }
-    }
-
-    throw error;
-  }
+  const manifest = await createSnapshotManifest(stagedDir, {
+    snapshotId: snapshot.status.snapshot.id,
+    sourceFingerprint: snapshot.status.snapshot.sourceFingerprint,
+    generatedAt: snapshot.status.snapshot.createdAt,
+  });
+  await writeJson(join(stagedDir, "manifest.json"), manifest);
+  await verifySnapshotManifest(stagedDir, manifest);
+  await replaceDirectoryAtomically(stagedDir, outputDir);
+  return manifest;
 }
 
 async function writeOptionalReport(reportPath, payload) {
@@ -429,7 +552,7 @@ function buildStaticSnapshot(snapshot) {
     const catalogItem = {
       alId: entry.alID,
       recordId: entry.id,
-      comparisonLinks: splitLinks(entry.comparison ?? ""),
+      comparisonLinks: splitLinks(entry.comparison ?? "").map((link) => sanitizeExternalUrl(link)).filter(Boolean),
       excerpt: summarizeNotes(entry.notes ?? ""),
       incomplete: entry.incomplete === true,
       sourceUpdatedAt: entry.updated,
@@ -466,7 +589,7 @@ function buildStaticSnapshot(snapshot) {
       episodes: media?.episodes ?? null,
       averageScore: media?.averageScore ?? null,
       incomplete: entry.incomplete === true,
-      comparisonCount: splitLinks(entry.comparison ?? "").length,
+      comparisonCount: splitLinks(entry.comparison ?? "").map((link) => sanitizeExternalUrl(link)).filter(Boolean).length,
       torrentCount: torrents.length,
       bestCount: bestTorrentCount,
       altCount: Math.max(0, torrents.length - bestTorrentCount),
@@ -485,7 +608,7 @@ function buildStaticSnapshot(snapshot) {
       entry: {
         alId: entry.alID,
         recordId: entry.id,
-        comparisonLinks: splitLinks(entry.comparison ?? ""),
+        comparisonLinks: splitLinks(entry.comparison ?? "").map((link) => sanitizeExternalUrl(link)).filter(Boolean),
         notes: entry.notes ?? "",
         theoreticalBest: entry.theoreticalBest ?? null,
         incomplete: entry.incomplete === true,
@@ -532,6 +655,13 @@ function buildStaticSnapshot(snapshot) {
 
   return {
     status: {
+      snapshot: {
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        id: snapshot.snapshotId,
+        sourceFingerprint: snapshot.sourceFingerprint,
+        createdAt: snapshot.finishedAt,
+        manifest: "manifest.json",
+      },
       mirror: {
         sourceBaseUrl: snapshot.sourceBaseUrl,
         originalSite: snapshot.sourceBaseUrl,
@@ -565,10 +695,9 @@ function buildStaticSnapshot(snapshot) {
           entries: snapshot.entries.length,
           torrents: torrentCount,
           anilistMedia: snapshot.anilistMedia.size,
-          upstreamProbe: {
-            size: snapshot.sourceProbe.items.length,
-            signature: snapshot.probeSignature,
-          },
+          sourceFingerprint: snapshot.sourceFingerprint,
+          snapshotId: snapshot.snapshotId,
+          aniListCache: snapshot.anilistStats,
         },
       },
     },
@@ -586,27 +715,37 @@ function buildStaticSnapshot(snapshot) {
       }),
     },
     sheetWorkbook: snapshot.sheetWorkbook,
-    anilistCache: snapshot.anilistMedia,
+    anilistCache: snapshot.anilistCache,
     entries: entryPayloads,
   };
 }
 
-async function fetchSheetWorkbookSnapshot(sheetWorkbookUrl) {
-  const response = await fetch(sheetWorkbookUrl, {
-    headers: {
-      accept:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream;q=0.9,*/*;q=0.8",
+async function fetchSheetWorkbookSnapshot(sheetWorkbookUrl, retryLimit) {
+  const response = await fetchWithRetry(
+    sheetWorkbookUrl,
+    {
+      headers: {
+        accept:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream;q=0.9,*/*;q=0.8",
+      },
     },
+    { retries: retryLimit, timeoutMs: 30_000, label: "SeaDex workbook" },
+  );
+  const workbookBuffer = await readResponseBuffer(response, {
+    maxBytes: MAX_WORKBOOK_BYTES,
+    label: "SeaDex workbook",
   });
-  if (!response.ok) {
-    throw new Error(`Sheet workbook request failed with ${response.status} ${response.statusText}.`);
-  }
-
-  const workbookBuffer = Buffer.from(await response.arrayBuffer());
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(workbookBuffer);
-  const publishedRichTextLinks = await fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook);
-  return serializeSheetWorkbook(workbook, publishedRichTextLinks);
+  const publishedRichTextLinks = await fetchPublishedSheetRichTextLinks(
+    sheetWorkbookUrl,
+    workbook,
+    retryLimit,
+  );
+  return {
+    sourceSha256: sha256Buffer(workbookBuffer),
+    payload: serializeSheetWorkbook(workbook, publishedRichTextLinks),
+  };
 }
 
 function serializeSheetWorkbook(workbook, publishedRichTextLinks = new Map()) {
@@ -834,7 +973,7 @@ function normalizeWorkbookCellStyle(style, themeColors) {
   });
 }
 
-async function fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook) {
+async function fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook, retryLimit) {
   const googleSheetId = extractGoogleSheetId(sheetWorkbookUrl);
   if (!googleSheetId) {
     return new Map();
@@ -842,12 +981,14 @@ async function fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook) {
 
   try {
     const htmlViewUrl = `https://docs.google.com/spreadsheets/d/${googleSheetId}/htmlview`;
-    const response = await fetch(htmlViewUrl);
-    if (!response.ok) {
-      return new Map();
-    }
-
-    const html = await response.text();
+    const response = await fetchWithRetry(htmlViewUrl, {}, {
+      retries: retryLimit,
+      label: "Published sheet index",
+    });
+    const html = await readTextResponse(response, {
+      maxBytes: MAX_PUBLISHED_SHEET_HTML_BYTES,
+      label: "Published sheet index",
+    });
     const publishedSheets = parsePublishedSheetTabs(html);
     if (publishedSheets.length === 0) {
       return new Map();
@@ -861,18 +1002,30 @@ async function fetchPublishedSheetRichTextLinks(sheetWorkbookUrl, workbook) {
         continue;
       }
 
-      const publishedSheetUrl = `https://docs.google.com/spreadsheets/d/${googleSheetId}/htmlview/sheet?headers=true&gid=${publishedSheet.gid}`;
-      const publishedSheetResponse = await fetch(publishedSheetUrl);
-      if (!publishedSheetResponse.ok) {
-        continue;
+      try {
+        const publishedSheetUrl = `https://docs.google.com/spreadsheets/d/${googleSheetId}/htmlview/sheet?headers=true&gid=${publishedSheet.gid}`;
+        const publishedSheetResponse = await fetchWithRetry(publishedSheetUrl, {}, {
+          retries: retryLimit,
+          label: `Published sheet tab ${publishedSheet.name}`,
+        });
+        const publishedSheetHtml = await readTextResponse(publishedSheetResponse, {
+          maxBytes: MAX_PUBLISHED_SHEET_HTML_BYTES,
+          label: `Published sheet tab ${publishedSheet.name}`,
+        });
+        richTextLinksBySheet.set(
+          publishedSheet.name,
+          parsePublishedSheetCellLinks(publishedSheetHtml),
+        );
+      } catch (error) {
+        console.warn(
+          `${PROGRESS_PREFIX} Could not enrich workbook links for tab ${publishedSheet.name}: ${errorMessage(error)}`,
+        );
       }
-
-      const publishedSheetHtml = await publishedSheetResponse.text();
-      richTextLinksBySheet.set(publishedSheet.name, parsePublishedSheetCellLinks(publishedSheetHtml));
     }
 
     return richTextLinksBySheet;
-  } catch {
+  } catch (error) {
+    console.warn(`${PROGRESS_PREFIX} Published sheet link enrichment unavailable: ${errorMessage(error)}`);
     return new Map();
   }
 }
@@ -1389,50 +1542,67 @@ function compareStrings(left, right) {
   return left.localeCompare(right);
 }
 
-async function fetchListIds(sourceBaseUrl) {
-  const response = await fetch(new URL("/api/listIDs", sourceBaseUrl), {
-    headers: { accept: "text/plain" },
-  });
-  if (!response.ok) {
-    throw new Error(`SeaDex listIDs fetch failed with ${response.status} ${response.statusText}`);
+async function fetchStableSourceSnapshot(sourceBaseUrl, pageSize, requiredPasses, retryLimit) {
+  let previousFingerprint = null;
+  let stablePasses = 0;
+  let latest = null;
+  const maxPasses = requiredPasses + 2;
+
+  for (let pass = 1; pass <= maxPasses; pass += 1) {
+    logStep(`SeaDex stability pass ${pass}/${maxPasses}...`);
+    const listIds = await fetchListIds(sourceBaseUrl, retryLimit);
+    const sourceSnapshot = await fetchSourceSnapshot(sourceBaseUrl, pageSize, retryLimit);
+    validateSeaDexSnapshot(listIds, sourceSnapshot.entries);
+    const fingerprint = buildSeaDexFingerprint(listIds, sourceSnapshot.entries);
+    latest = { listIds, entries: sourceSnapshot.entries, seaDexFingerprint: fingerprint };
+
+    if (fingerprint === previousFingerprint) {
+      stablePasses += 1;
+    } else {
+      stablePasses = 1;
+      previousFingerprint = fingerprint;
+    }
+
+    if (stablePasses >= requiredPasses) {
+      return latest;
+    }
+
+    if (pass < maxPasses) {
+      logStep("SeaDex changed between reads; repeating until two full snapshots agree.");
+    }
   }
 
-  return response
-    .text()
-    .then((text) =>
-      text
-        .split(",")
-        .map((value) => Number(value.trim()))
-        .filter((value) => Number.isInteger(value) && value > 0),
-    );
+  throw new Error(
+    `SeaDex did not produce ${requiredPasses} consecutive identical full snapshots after ${maxPasses} passes. Previous mirror retained.`,
+  );
 }
 
-async function fetchSourceProbe(sourceBaseUrl, pageSize) {
-  const endpoint = new URL("/api/collections/entries/records", sourceBaseUrl);
-  endpoint.searchParams.set("page", "1");
-  endpoint.searchParams.set("perPage", String(pageSize));
-  endpoint.searchParams.set("sort", "-updated");
-  endpoint.searchParams.set("skipTotal", "1");
-
-  const response = await fetch(endpoint, {
-    headers: { accept: "application/json" },
+async function fetchListIds(sourceBaseUrl, retryLimit) {
+  const endpoint = new URL("/api/listIDs", sourceBaseUrl);
+  const response = await fetchWithRetry(
+    endpoint,
+    { headers: { accept: "text/plain" } },
+    { retries: retryLimit, label: "SeaDex listIDs" },
+  );
+  const text = await readTextResponse(response, {
+    maxBytes: 4 * 1024 * 1024,
+    label: "SeaDex listIDs",
   });
-  if (!response.ok) {
-    throw new Error(`SeaDex probe fetch failed with ${response.status} ${response.statusText}`);
+  const ids = text
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  if (ids.length === 0) {
+    throw new Error("SeaDex listIDs returned no valid IDs.");
   }
-
-  const payload = await response.json();
-  return {
-    items: Array.isArray(payload.items) ? payload.items : [],
-  };
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("SeaDex listIDs returned duplicate IDs.");
+  }
+  return ids;
 }
 
-function buildProbeSignature(listIds, items) {
-  const probeRecords = items.map((item) => `${item.alID}:${item.updated}`).join("|");
-  return `ids=${listIds.join(",")};probe=${probeRecords}`;
-}
-
-async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
+async function fetchSourceSnapshot(sourceBaseUrl, pageSize, retryLimit) {
   const endpoint = new URL("/api/collections/entries/records", sourceBaseUrl);
   const entries = [];
   let page = 1;
@@ -1444,15 +1614,16 @@ async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
     endpoint.searchParams.set("skipTotal", "1");
     endpoint.searchParams.set("expand", "trs");
 
-    const response = await fetch(endpoint, {
-      headers: { accept: "application/json" },
+    const response = await fetchWithRetry(
+      endpoint,
+      { headers: { accept: "application/json" } },
+      { retries: retryLimit, label: `SeaDex entries page ${page}` },
+    );
+    const payload = await readJsonResponse(response, {
+      maxBytes: MAX_SOURCE_JSON_BYTES,
+      label: `SeaDex entries page ${page}`,
     });
-    if (!response.ok) {
-      throw new Error(`SeaDex entries fetch failed with ${response.status} ${response.statusText}`);
-    }
-
-    const payload = await response.json();
-    const items = payload.items ?? [];
+    const items = Array.isArray(payload?.items) ? payload.items : [];
     entries.push(...items);
     logStep(`Fetched source page ${page} with ${items.length} rows (${entries.length} accumulated).`);
 
@@ -1460,216 +1631,208 @@ async function fetchSourceSnapshot(sourceBaseUrl, pageSize) {
       break;
     }
     page += 1;
+    if (page > 100_000) {
+      throw new Error("SeaDex pagination exceeded the safety ceiling.");
+    }
   }
 
   const deduped = [];
   const seen = new Set();
   for (const entry of entries) {
+    if (!Number.isInteger(entry?.alID) || entry.alID <= 0) {
+      throw new Error("SeaDex entries response contains a row without a valid alID.");
+    }
     if (seen.has(entry.alID)) {
-      continue;
+      throw new Error(`SeaDex entries response contains duplicate AniList ID ${entry.alID}.`);
     }
     seen.add(entry.alID);
     deduped.push(entry);
   }
 
-  return {
-    entries: deduped,
+  return { entries: deduped };
+}
+
+async function fetchAniListSnapshot(
+  endpoint,
+  ids,
+  batchSize,
+  delayMs,
+  retryLimit,
+  accessToken,
+  existingCache,
+  refreshAniList,
+  cacheTtlHours,
+) {
+  const media = new Map();
+  // Rebuild the cache from the active SeaDex ID set so records for removed entries
+  // cannot accumulate forever. Fresh/stale records are copied below as they are used.
+  const cache = new Map();
+  const refreshIds = [];
+  const cutoff = Date.now() - cacheTtlHours * 60 * 60 * 1000;
+  const stats = {
+    reusedFresh: 0,
+    fetched: 0,
+    staleFallback: 0,
+    unresolved: 0,
+    ttlHours: cacheTtlHours,
   };
-}
 
-function validateSourceSnapshot(listIds, entries) {
-  const listIdSet = new Set(listIds);
-  const entryIdSet = new Set(entries.map((entry) => entry.alID));
-
-  if (listIdSet.size !== entryIdSet.size) {
-    throw new Error(
-      `SeaDex parity failure: listIDs has ${listIdSet.size} ids but expanded entries returned ${entryIdSet.size}.`,
-    );
-  }
-
-  for (const id of listIdSet) {
-    if (!entryIdSet.has(id)) {
-      throw new Error(`SeaDex parity failure: AniList ${id} exists in listIDs but not in expanded entries.`);
+  for (const id of ids) {
+    const cached = existingCache.get(id) ?? null;
+    if (!refreshAniList && isFreshCacheRecord(cached, cutoff)) {
+      media.set(id, cached.media);
+      cache.set(id, cached);
+      stats.reusedFresh += 1;
+    } else {
+      refreshIds.push(id);
     }
   }
 
-  for (const entry of entries) {
-    const expandedTorrents = entry.expand?.trs ?? [];
-    const linkedTorrentIds = Array.isArray(entry.trs) ? entry.trs : [];
-
-    if (expandedTorrents.length !== linkedTorrentIds.length) {
-      throw new Error(
-        `SeaDex torrent parity failure for AniList ${entry.alID}: trs has ${linkedTorrentIds.length} ids but expand.trs returned ${expandedTorrents.length} rows.`,
-      );
-    }
-
-    const expandedIds = new Set(expandedTorrents.map((torrent) => torrent.id));
-    for (const torrentId of linkedTorrentIds) {
-      if (!expandedIds.has(torrentId)) {
-        throw new Error(
-          `SeaDex torrent parity failure for AniList ${entry.alID}: linked torrent ${torrentId} is missing from expand.trs.`,
-        );
-      }
-    }
+  if (stats.reusedFresh > 0) {
+    logStep(`Reused fresh AniList metadata for ${stats.reusedFresh}/${ids.length} entries.`);
   }
-}
-
-async function fetchAniListSnapshot(endpoint, ids, batchSize, delayMs, retryLimit, accessToken, existingCache, refreshAniList) {
-  const mediaMap = new Map();
-  const missingIds = [];
-
-  if (!refreshAniList) {
-    for (const id of ids) {
-      const cached = existingCache.get(id) ?? null;
-      if (cached) {
-        mediaMap.set(id, cached);
-        continue;
-      }
-      missingIds.push(id);
-    }
-  } else {
-    missingIds.push(...ids);
+  if (refreshAniList) {
+    logStep(`Explicit AniList cache refresh requested for ${refreshIds.length} entries.`);
+  } else if (refreshIds.length > 0) {
+    logStep(`Refreshing ${refreshIds.length} missing or expired AniList cache record(s).`);
   }
 
-  if (mediaMap.size) {
-    logStep(`Reused cached AniList metadata for ${mediaMap.size}/${ids.length} entries.`);
-  } else if (refreshAniList) {
-    logStep(`AniList cache refresh requested for ${ids.length} entries.`);
-  }
-
-  const batches = chunk(missingIds, batchSize);
-  if (batches.length === 0) {
-    return mediaMap;
-  }
-
+  const batches = chunk(refreshIds, batchSize);
   for (const [index, batch] of batches.entries()) {
-    let payload;
+    let payload = null;
+    let requestError = null;
     logStep(`AniList batch ${index + 1}/${batches.length} starting (${batch.length} ids).`);
 
     try {
-      payload = await withRetry(
-        () => fetchAniListBatch(endpoint, batch, accessToken),
-        retryLimit,
-        `AniList batch ${index + 1}/${batches.length}`,
-      );
+      payload = await fetchAniListBatch(endpoint, batch, accessToken, retryLimit);
     } catch (error) {
+      requestError = error;
       if (accessToken) {
-        console.warn(`AniList token mode failed for batch ${index + 1}/${batches.length}. Falling back to public mode.`);
+        console.warn(
+          `${PROGRESS_PREFIX} AniList authenticated request failed for batch ${index + 1}/${batches.length}; retrying in public mode.`,
+        );
         try {
-          payload = await withRetry(
-            () => fetchAniListBatch(endpoint, batch, ""),
-            retryLimit,
-            `AniList public batch ${index + 1}/${batches.length}`,
-          );
-        } catch {
-          payload = resolveCachedAniListBatch(batch, existingCache);
+          payload = await fetchAniListBatch(endpoint, batch, "", retryLimit);
+        } catch (publicError) {
+          requestError = publicError;
         }
-      } else {
-        payload = resolveCachedAniListBatch(batch, existingCache);
-      }
-
-      if (!payload.length) {
-        throw error;
       }
     }
 
-    for (const media of payload) {
-      mediaMap.set(media.id, media);
+    const returnedById = new Map(
+      Array.isArray(payload)
+        ? payload
+            .filter((item) => Number.isInteger(item?.id) && item.id > 0)
+            .map((item) => [item.id, item])
+        : [],
+    );
+    const fetchedAt = new Date().toISOString();
+    let batchFallbacks = 0;
+    let batchUnresolved = 0;
+
+    for (const id of batch) {
+      const fetchedMedia = returnedById.get(id) ?? null;
+      if (fetchedMedia) {
+        media.set(id, fetchedMedia);
+        cache.set(id, { media: fetchedMedia, fetchedAt });
+        stats.fetched += 1;
+        continue;
+      }
+
+      const cached = existingCache.get(id) ?? null;
+      if (cached?.media) {
+        media.set(id, cached.media);
+        cache.set(id, cached);
+        stats.staleFallback += 1;
+        batchFallbacks += 1;
+        continue;
+      }
+
+      stats.unresolved += 1;
+      batchUnresolved += 1;
     }
-    logStep(`AniList batch ${index + 1}/${batches.length} finished (${payload.length} records, ${mediaMap.size} total).`);
+
+    if (!payload && requestError) {
+      console.warn(
+        `${PROGRESS_PREFIX} AniList batch ${index + 1}/${batches.length} unavailable; retained ${batchFallbacks} cached record(s), with ${batchUnresolved} unresolved: ${errorMessage(requestError)}`,
+      );
+    }
+
+    logStep(
+      `AniList batch ${index + 1}/${batches.length} finished (${returnedById.size} fetched, ${media.size} total resolved).`,
+    );
 
     if (index < batches.length - 1 && delayMs > 0) {
-      logStep(`Waiting ${delayMs}ms before next AniList batch...`);
       await sleep(delayMs);
     }
   }
 
-  return mediaMap;
+  if (stats.unresolved > 0) {
+    console.warn(
+      `${PROGRESS_PREFIX} AniList enrichment is unavailable for ${stats.unresolved} entry/entries. SeaDex source data will still be preserved.`,
+    );
+  }
+
+  return { media, cache, stats };
 }
 
-async function fetchAniListBatch(endpoint, ids, accessToken) {
+async function fetchAniListBatch(endpoint, ids, accessToken, retryLimit) {
   const headers = {
     "content-type": "application/json",
     accept: "application/json",
   };
-
   if (accessToken) {
     headers.authorization = `Bearer ${accessToken}`;
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      query: ANILIST_MEDIA_QUERY,
-      variables: {
-        ids,
-        page: 1,
-        perPage: ids.length,
-      },
-    }),
+  const response = await fetchWithRetry(
+    endpoint,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: ANILIST_MEDIA_QUERY,
+        variables: { ids, page: 1, perPage: ids.length },
+      }),
+    },
+    { retries: retryLimit, label: "AniList GraphQL" },
+  );
+  const payload = await readJsonResponse(response, {
+    maxBytes: 16 * 1024 * 1024,
+    label: "AniList GraphQL",
   });
-
-  if (!response.ok) {
-    const message = `AniList fetch failed with ${response.status} ${response.statusText}`;
-    const retryAfterHeader = response.headers.get("retry-after");
-    const retryAfterMs = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) * 1000 : null;
-    const error = new Error(message);
-    error.retryAfterMs = retryAfterMs;
-    throw error;
-  }
-
-  const payload = await response.json();
   if (payload.errors?.length) {
     throw new Error(payload.errors.map((item) => item.message ?? "Unknown AniList error").join("; "));
   }
-
-  return payload.data?.Page?.media ?? [];
-}
-
-function resolveCachedAniListBatch(ids, existingCache) {
-  const cached = ids
-    .map((id) => existingCache.get(id) ?? null)
-    .filter(Boolean);
-
-  if (cached.length) {
-    console.warn(`Using cached AniList metadata for ${cached.length}/${ids.length} entries.`);
-  }
-
-  return cached;
-}
-
-async function withRetry(work, retryLimit, label) {
-  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-    try {
-      return await work();
-    } catch (error) {
-      if (attempt === retryLimit) {
-        throw error;
-      }
-
-      const retryAfterMs =
-        typeof error.retryAfterMs === "number" && Number.isFinite(error.retryAfterMs)
-          ? error.retryAfterMs
-          : 1500 * (attempt + 1);
-
-      console.warn(`${label} failed on attempt ${attempt + 1}. Retrying in ${retryAfterMs}ms.`);
-      await sleep(retryAfterMs);
-    }
-  }
-
-  throw new Error(`${label} exhausted retries.`);
+  return Array.isArray(payload.data?.Page?.media) ? payload.data.Page.media : [];
 }
 
 function resolveSourceUrl(sourceBaseUrl, value) {
+  return sanitizeExternalUrl(value, sourceBaseUrl, new Set(["https:", "http:", "magnet:"])) ?? "";
+}
+
+function requireHttpUrl(value, label) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new Error(`unsupported protocol ${url.protocol}`);
+    }
+    return url.toString().replace(/\/+$/u, "");
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${errorMessage(error)}`, { cause: error });
+  }
+}
+
+function sanitizeExternalUrl(value, baseUrl = undefined, allowedProtocols = new Set(["https:", "http:"])) {
   if (!value) {
-    return "";
+    return null;
   }
 
   try {
-    return new URL(value, sourceBaseUrl).toString();
+    const url = baseUrl ? new URL(String(value), baseUrl) : new URL(String(value));
+    return allowedProtocols.has(url.protocol) ? url.toString() : null;
   } catch {
-    return value;
+    return null;
   }
 }
 
@@ -1703,13 +1866,29 @@ function filterRelevantRelations(edges, availableAnimeIds) {
   });
 }
 
-async function pathExists(targetPath) {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
+function isValidDateString(value) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return "unknown size";
   }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const units = ["KiB", "MiB", "GiB"];
+  let current = value / 1024;
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  return `${current.toFixed(current >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
 function parseArgs(rawArgs) {
@@ -1754,6 +1933,11 @@ function resolveOnUnchangedBehavior(args) {
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeInt(value, fallback) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function chunk(items, size) {

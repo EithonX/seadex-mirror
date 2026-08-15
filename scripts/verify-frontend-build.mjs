@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readSnapshotManifest, verifySnapshotManifest } from "./lib/snapshot-integrity.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distDir = join(repoRoot, "dist");
@@ -92,6 +93,16 @@ if (!Array.isArray(sheetWorkbookPayload?.sheets)) {
 const entryJsonFiles = mirrorEntryFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
 if (entryJsonFiles.length === 0) {
   fail("dist/mirror-data/entries does not contain any entry JSON files.");
+}
+
+try {
+  const manifest = await readSnapshotManifest(mirrorDataDir);
+  const verification = await verifySnapshotManifest(mirrorDataDir, manifest);
+  if (statusPayload?.snapshot?.id !== verification.snapshotId) {
+    fail("dist snapshot ID differs between status.json and manifest.json.");
+  }
+} catch (error) {
+  fail(`dist mirror manifest verification failed: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 const [indexHtml, assetEntries] = await Promise.all([

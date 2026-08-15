@@ -7,6 +7,7 @@ import {
   type SheetWorkbookRow,
   type SheetWorkbookSheet,
 } from "../../shared/mirror";
+import { safeExternalUrl } from "./html";
 
 const URL_PATTERN = /(https?:\/\/[^\s<]+)/g;
 
@@ -678,6 +679,8 @@ function renderComparisonCell(cell: TableCell) {
     <div class="sheet-cell-body">
       <div class="sheet-links">
         ${urls
+          .map((url) => safeExternalUrl(url))
+          .filter((url): url is string => Boolean(url))
           .map(
             (url) =>
               `<a class="sheet-links__item" href="${escapeHtml(url)}" target="_blank" rel="noreferrer" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`,
@@ -723,8 +726,9 @@ function renderRichText(richText: SheetWorkbookRichTextRun[], hyperlink: string 
   const rendered = richText
     .map((run) => {
       const style = renderInlineRichTextStyle(run);
-      if (run.hyperlink) {
-        return `<a class="sheet-link" href="${escapeHtml(run.hyperlink)}" target="_blank" rel="noreferrer"${style ? ` style="${style}"` : ""}>${escapeHtml(run.text).replace(/\n/g, "<br />")}</a>`;
+      const runHref = safeExternalUrl(run.hyperlink);
+      if (runHref) {
+        return `<a class="sheet-link" href="${escapeHtml(runHref)}" target="_blank" rel="noreferrer"${style ? ` style="${style}"` : ""}>${escapeHtml(run.text).replace(/\n/g, "<br />")}</a>`;
       }
 
       const linked = renderAutoLinkedText(run.text, style);
@@ -732,9 +736,10 @@ function renderRichText(richText: SheetWorkbookRichTextRun[], hyperlink: string 
     })
     .join("");
 
-  if (hyperlink && !hasRunLevelHyperlinks && !URL_PATTERN.test(fullText)) {
+  const safeHyperlink = safeExternalUrl(hyperlink);
+  if (safeHyperlink && !hasRunLevelHyperlinks && !URL_PATTERN.test(fullText)) {
     URL_PATTERN.lastIndex = 0;
-    return `<a class="sheet-link" href="${escapeHtml(hyperlink)}" target="_blank" rel="noreferrer">${rendered}</a>`;
+    return `<a class="sheet-link" href="${escapeHtml(safeHyperlink)}" target="_blank" rel="noreferrer">${rendered}</a>`;
   }
 
   URL_PATTERN.lastIndex = 0;
@@ -751,8 +756,9 @@ function renderPlainText(text: string, hyperlink: string | null) {
     return linked;
   }
 
-  if (hyperlink) {
-    return `<a class="sheet-link" href="${escapeHtml(hyperlink)}" target="_blank" rel="noreferrer">${escapeHtml(text).replace(/\n/g, "<br />")}</a>`;
+  const safeHyperlink = safeExternalUrl(hyperlink);
+  if (safeHyperlink) {
+    return `<a class="sheet-link" href="${escapeHtml(safeHyperlink)}" target="_blank" rel="noreferrer">${escapeHtml(text).replace(/\n/g, "<br />")}</a>`;
   }
 
   return escapeHtml(text).replace(/\n/g, "<br />");
@@ -771,11 +777,14 @@ function renderAutoLinkedText(text: string, inlineStyle: string) {
 
   while ((match = URL_PATTERN.exec(text))) {
     const [url] = match;
+    const safeUrl = safeExternalUrl(url);
     const before = text.slice(lastIndex, match.index);
     if (before) {
       html += `<span${inlineStyle ? ` style="${inlineStyle}"` : ""}>${escapeHtml(before).replace(/\n/g, "<br />")}</span>`;
     }
-    html += `<a class="sheet-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer"${inlineStyle ? ` style="${inlineStyle}"` : ""}>${escapeHtml(url)}</a>`;
+    html += safeUrl
+      ? `<a class="sheet-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer"${inlineStyle ? ` style="${inlineStyle}"` : ""}>${escapeHtml(url)}</a>`
+      : escapeHtml(url);
     lastIndex = match.index + url.length;
   }
 

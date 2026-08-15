@@ -2,21 +2,32 @@
 
 ## Reporting a vulnerability
 
-If you find a security issue, open a [GitHub issue](https://github.com/EithonX/seadex-mirror/issues/new) with the `bug` label.
+Please **do not open a public issue containing vulnerability details, leaked credentials, proof-of-concept payloads, or other sensitive security information**.
 
-This is a static site — no server-side runtime, no authentication, no user data. The attack surface is small. But if you find something worth reporting (XSS in the frontend, a CSP bypass, credentials leaking through the build pipeline), please do.
+Use GitHub's **Security → Report a vulnerability** flow for this repository so the report starts as a private security advisory. Include the affected component, impact, reproduction steps, and any proof of concept needed to validate the issue.
+
+If private vulnerability reporting is temporarily unavailable, open a public issue containing only a request for a private reporting channel. Do not include the vulnerability details in that issue.
+
+For ordinary non-sensitive bugs, use the normal issue tracker.
 
 ## Scope
 
-**In scope:**
+In scope:
 
-- The mirror frontend at [seadex.pages.dev](https://seadex.pages.dev)
-- Build scripts in `scripts/`
+- the mirror frontend deployed from this repository
+- build, snapshot, verification, and recovery scripts under `scripts/`
 - GitHub Actions workflows
-- Cloudflare Pages configuration (`_headers`, `_redirects`)
+- repository-controlled Cloudflare Pages headers and redirects
+- supply-chain or workflow issues that could expose repository/deployment credentials or publish an untrusted snapshot
 
-**Out of scope:**
+Out of scope:
 
-- The upstream SeaDex site at [releases.moe](https://releases.moe)
-- AniList's API or website
-- Cloudflare's own infrastructure
+- vulnerabilities in the upstream SeaDex service that are not caused by this mirror
+- vulnerabilities in AniList itself
+- Cloudflare or GitHub infrastructure vulnerabilities outside this repository's configuration
+
+## Design notes
+
+This project intentionally has no application server, login system, user database, or server-side session state. That reduces the public runtime attack surface, but the build pipeline remains security-sensitive because it holds deployment credentials and converts third-party data into published HTML/JSON.
+
+The workflows therefore scope secrets to individual steps, pin external Actions to immutable commit SHAs, validate externally sourced URLs before rendering, and cryptographically verify snapshots before deployment/archive.

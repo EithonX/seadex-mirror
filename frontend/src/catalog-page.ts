@@ -1,6 +1,6 @@
 import type { CatalogIndexItem, CatalogItem } from "../../shared/mirror";
 import { capitalize, formatCatalogFormat, formatDate } from "./format";
-import { escapeHtml } from "./html";
+import { escapeHtml, safeExternalUrl } from "./html";
 import { renderDotsIcon } from "./icons";
 
 export function renderCatalogSkeleton(): string {
@@ -116,7 +116,7 @@ export function renderFormatOptions(activeFormat: string) {
 export function renderCatalogRow(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "-";
-  const posterSrc = item.coverImage?.extraLarge ?? "";
+  const posterSrc = safeExternalUrl(item.coverImage?.extraLarge) ?? "";
   const menuId = `row-menu-${item.alId}`;
 
   return `
@@ -144,11 +144,7 @@ export function renderCatalogRow(item: CatalogItem) {
           <div id="${menuId}" class="row-menu" role="menu" hidden>
             <a href="/${item.alId}" role="menuitem">Open entry</a>
             <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer" role="menuitem">AniList</a>
-            ${
-              item.comparisonLinks[0]
-                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer" role="menuitem">First comparison</a>`
-                : ""
-            }
+            ${renderFirstComparisonLink(item.comparisonLinks[0])}
           </div>
         </div>
       </td>
@@ -159,7 +155,7 @@ export function renderCatalogRow(item: CatalogItem) {
 export function renderCatalogMobileCard(item: CatalogItem) {
   const groups = readGroupSummary(item);
   const year = item.startYear ?? item.seasonYear ?? "Unknown";
-  const posterSrc = item.coverImage?.extraLarge ?? "";
+  const posterSrc = safeExternalUrl(item.coverImage?.extraLarge) ?? "";
   const menuId = `mobile-row-menu-${item.alId}`;
 
   return `
@@ -181,11 +177,7 @@ export function renderCatalogMobileCard(item: CatalogItem) {
           <div id="${menuId}" class="row-menu row-menu--mobile" role="menu" hidden>
             <a href="/${item.alId}" role="menuitem">Open entry</a>
             <a href="https://anilist.co/anime/${item.alId}" target="_blank" rel="noreferrer" role="menuitem">AniList</a>
-            ${
-              item.comparisonLinks[0]
-                ? `<a href="${escapeHtml(item.comparisonLinks[0])}" target="_blank" rel="noreferrer" role="menuitem">First comparison</a>`
-                : ""
-            }
+            ${renderFirstComparisonLink(item.comparisonLinks[0])}
           </div>
         </div>
       </div>
@@ -266,4 +258,11 @@ function readGroupSummary(item: CatalogItem) {
         ? `${item.torrentCount - item.bestTorrentCount} release${item.torrentCount - item.bestTorrentCount === 1 ? "" : "s"}`
         : "",
   };
+}
+
+function renderFirstComparisonLink(value: string | undefined) {
+  const url = safeExternalUrl(value);
+  return url
+    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" role="menuitem">First comparison</a>`
+    : "";
 }

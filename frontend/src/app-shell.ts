@@ -6,7 +6,7 @@ import { renderCloseIcon, renderMoonIcon, renderSearchIcon, renderSunIcon } from
 
 export type PageContext = "index" | "entry" | "about" | "sheet";
 
-export function renderPageFrame(context: PageContext, content: string, status?: MirrorStatus) {
+export function renderPageFrame(context: PageContext, content: string, status?: MirrorStatus | null) {
   return `
     ${renderShell(context)}
     ${content}
@@ -46,10 +46,9 @@ function renderShell(context: PageContext) {
   `;
 }
 
-export function renderSiteFooter(status?: MirrorStatus) {
-  const entriesCount = status ? status.counts.entries.toLocaleString() : "2,796";
-  const torrentsCount = status ? status.counts.torrents.toLocaleString() : "9,169";
-  const updatedDate = status && status.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : null;
+export function renderSiteFooter(status?: MirrorStatus | null) {
+  const updatedDate = status?.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : null;
+  const snapshotLabel = status?.snapshot?.id ? status.snapshot.id.slice(0, 12) : null;
 
   return `
     <footer class="site-footer">
@@ -59,16 +58,16 @@ export function renderSiteFooter(status?: MirrorStatus) {
           <span class="site-footer__by">by <a href="${escapeHtml(DEVELOPER_GITHUB_URL)}" target="_blank" rel="noreferrer">${escapeHtml(DEVELOPER_GITHUB_USERNAME)}</a></span>
         </div>
         <div class="site-footer__right">
-          <span class="stat-group"><strong class="stat-num">${entriesCount}</strong> entries</span>
-          <span class="stat-sep">&bull;</span>
-          <span class="stat-group"><strong class="stat-num">${torrentsCount}</strong> torrents</span>
           ${
-            updatedDate
+            status
               ? `
-                <span class="stat-sep stat-sep--time">&bull;</span>
-                <span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>
+                <span class="stat-group"><strong class="stat-num">${status.counts.entries.toLocaleString()}</strong> entries</span>
+                <span class="stat-sep">&bull;</span>
+                <span class="stat-group"><strong class="stat-num">${status.counts.torrents.toLocaleString()}</strong> torrents</span>
+                ${updatedDate ? `<span class="stat-sep stat-sep--time">&bull;</span><span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>` : ""}
+                ${snapshotLabel ? `<span class="stat-sep stat-sep--snapshot">&bull;</span><span class="snapshot-badge" title="Verified content snapshot ${escapeHtml(status.snapshot.id)}">Verified ${escapeHtml(snapshotLabel)}</span>` : ""}
               `
-              : ""
+              : `<span class="snapshot-badge snapshot-badge--unknown" title="Freshness metadata could not be loaded. Core mirror data can still be browsed.">Snapshot status unavailable</span>`
           }
         </div>
       </div>

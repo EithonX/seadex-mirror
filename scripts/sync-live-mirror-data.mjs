@@ -1,93 +1,111 @@
-// Downloads the currently deployed mirror-data snapshot into
-// frontend/public/mirror-data so the site can be redeployed (e.g. for a
-// header-only change) while the upstream source is down, without regressing data.
-// Files are staged in a temp directory and swapped in only after every
-// download succeeds, so a failed sync never leaves a partial snapshot behind.
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+// Restores the exact deployed mirror-data snapshot into frontend/public/mirror-data.
+// The remote manifest is downloaded first, every listed file is hash-verified in
+// staging, and the previous local snapshot is replaced atomically only after the
+// complete snapshot passes verification.
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { replaceDirectoryAtomically } from "./lib/atomic-directory.mjs";
+import { fetchWithRetry, readResponseBuffer, readJsonResponse } from "./lib/http.mjs";
+import { validateSnapshotManifest, verifySnapshotManifest } from "./lib/snapshot-integrity.mjs";
 
-const BASE_URL = (process.env.MIRROR_BASE_URL ?? "https://seadex.pages.dev").replace(/\/+$/, "");
+const BASE_URL = (process.env.MIRROR_BASE_URL ?? "https://seadex.pages.dev").replace(/\/+$/u, "");
 const OUTPUT_DIR = resolve("frontend/public/mirror-data");
-const STAGING_DIR = resolve("tmp/mirror-data-sync-staging");
-const CONCURRENCY = 12;
-const RETRY_LIMIT = 3;
+const OUTPUT_PARENT = dirname(OUTPUT_DIR);
+const STAGING_DIR = join(
+  OUTPUT_PARENT,
+  `.${basename(OUTPUT_DIR)}.sync-${process.pid}-${Date.now()}`,
+);
+const CONCURRENCY = positiveInt(process.env.MIRROR_SYNC_CONCURRENCY, 12);
+const RETRY_LIMIT = positiveInt(process.env.MIRROR_SYNC_RETRIES, 4);
+const MAX_REMOTE_FILE_BYTES = 64 * 1024 * 1024;
 
-async function fetchText(path) {
-  const url = `${BASE_URL}/mirror-data/${path}`;
-  for (let attempt = 1; attempt <= RETRY_LIMIT; attempt++) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.text();
-    } catch (error) {
-      if (attempt === RETRY_LIMIT) throw new Error(`Failed to fetch ${url}: ${error.message}`);
-      await new Promise((r) => setTimeout(r, 500 * attempt));
+async function main() {
+  console.log(`Syncing verified live mirror data from ${BASE_URL} into ${OUTPUT_DIR}`);
+  await rm(STAGING_DIR, { recursive: true, force: true });
+  await mkdir(STAGING_DIR, { recursive: true });
+
+  const manifestResponse = await fetchWithRetry(
+    `${BASE_URL}/mirror-data/manifest.json`,
+    { headers: { accept: "application/json" } },
+    { retries: RETRY_LIMIT, label: "Live snapshot manifest" },
+  );
+  const manifest = await readJsonResponse(manifestResponse, {
+    maxBytes: 4 * 1024 * 1024,
+    label: "Live snapshot manifest",
+  });
+  validateManifestForDownload(manifest);
+
+  const queue = [...manifest.files];
+  let completed = 0;
+  const failures = [];
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, Math.max(1, queue.length)) }, async () => {
+      while (queue.length > 0) {
+        const file = queue.shift();
+        if (!file) break;
+        try {
+          const response = await fetchWithRetry(
+            `${BASE_URL}/mirror-data/${file.path.split("/").map(encodeURIComponent).join("/")}`,
+            {},
+            { retries: RETRY_LIMIT, label: `Live snapshot ${file.path}` },
+          );
+          const bytes = await readResponseBuffer(response, {
+            maxBytes: Math.min(MAX_REMOTE_FILE_BYTES, file.bytes + 1),
+            label: `Live snapshot ${file.path}`,
+          });
+          if (bytes.length !== file.bytes) {
+            throw new Error(`Expected ${file.bytes} bytes, received ${bytes.length}.`);
+          }
+          const target = join(STAGING_DIR, file.path);
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, bytes);
+        } catch (error) {
+          failures.push(`${file.path}: ${formatError(error)}`);
+        } finally {
+          completed += 1;
+          if (completed % 250 === 0 || completed === manifest.files.length) {
+            console.log(`Files: ${completed}/${manifest.files.length}`);
+          }
+        }
+      }
+    }),
+  );
+
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} snapshot file(s) failed to download; previous local snapshot retained. First failure: ${failures[0]}`,
+    );
+  }
+
+  await writeFile(join(STAGING_DIR, "manifest.json"), `${JSON.stringify(manifest)}\n`, "utf8");
+  const verified = await verifySnapshotManifest(STAGING_DIR, manifest);
+  await replaceDirectoryAtomically(STAGING_DIR, OUTPUT_DIR);
+  console.log(
+    `Sync complete: snapshot ${verified.snapshotId.slice(0, 12)}, ${verified.files} verified files.`,
+  );
+}
+
+function validateManifestForDownload(manifest) {
+  validateSnapshotManifest(manifest);
+  for (const file of manifest.files) {
+    if (file.bytes > MAX_REMOTE_FILE_BYTES) {
+      throw new Error(
+        `Live manifest file ${file.path} is ${file.bytes} bytes, above the ${MAX_REMOTE_FILE_BYTES}-byte sync safety limit.`,
+      );
     }
   }
 }
 
-async function save(path, text) {
-  const target = join(STAGING_DIR, path);
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, text);
+function positiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
-
-async function main() {
-  console.log(`Syncing live mirror data from ${BASE_URL} into ${OUTPUT_DIR}`);
-  await rm(STAGING_DIR, { recursive: true, force: true });
-  await mkdir(STAGING_DIR, { recursive: true });
-
-  const statusText = await fetchText("status.json");
-  const status = JSON.parse(statusText);
-  const catalogText = await fetchText("catalog.json");
-  const catalog = JSON.parse(catalogText);
-  if (!Array.isArray(catalog.items) || catalog.items.length === 0) {
-    throw new Error("Live catalog.json has no items; refusing to sync.");
-  }
-  if (catalog.items.length !== status?.counts?.entries) {
-    throw new Error(
-      `Live snapshot is inconsistent: catalog has ${catalog.items.length} items but status.json reports ${status?.counts?.entries}. A deploy may be in progress; retry later.`,
-    );
-  }
-  await save("status.json", statusText);
-  await save("catalog.json", catalogText);
-  for (const name of ["sheet.json", "sheet-workbook.json", "anilist-cache.json"]) {
-    await save(name, await fetchText(name));
-    console.log(`Saved ${name}`);
-  }
-
-  const ids = catalog.items.map((item) => item.alId);
-  const queue = [...ids];
-  let done = 0;
-  const failures = [];
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, async () => {
-      while (queue.length > 0) {
-        const id = queue.shift();
-        try {
-          await save(`entries/${id}.json`, await fetchText(`entries/${id}.json`));
-        } catch (error) {
-          failures.push(id);
-          console.error(error.message);
-        }
-        done++;
-        if (done % 250 === 0) console.log(`Entries: ${done}/${ids.length}`);
-      }
-    }),
-  );
-  console.log(`Entries: ${done}/${ids.length}, failures: ${failures.length}`);
-  if (failures.length > 0) {
-    throw new Error(`${failures.length} entry file(s) failed to download; leaving ${OUTPUT_DIR} untouched.`);
-  }
-
-  await rm(OUTPUT_DIR, { recursive: true, force: true });
-  await rename(STAGING_DIR, OUTPUT_DIR);
-  console.log("Sync complete.");
-}
+function formatError(error) { return error instanceof Error ? error.message : String(error); }
 
 main()
   .catch((error) => {
-    console.error(error.message);
+    console.error(formatError(error));
     process.exitCode = 1;
   })
   .finally(() => rm(STAGING_DIR, { recursive: true, force: true }));

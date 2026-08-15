@@ -31,3 +31,21 @@ export function debounce(callback: () => void | Promise<void>, delayMs: number) 
 export function isTypingTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 }
+
+const DEFAULT_EXTERNAL_PROTOCOLS: ReadonlySet<string> = new Set(["https:", "http:"]);
+
+export function safeExternalUrl(
+  value: string | null | undefined,
+  allowedProtocols: ReadonlySet<string> = DEFAULT_EXTERNAL_PROTOCOLS,
+) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return allowedProtocols.has(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}

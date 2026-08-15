@@ -1,4 +1,11 @@
 export type MirrorStatus = {
+  snapshot: {
+    schemaVersion: number;
+    id: string;
+    sourceFingerprint: string;
+    createdAt: string;
+    manifest: string;
+  };
   mirror: {
     sourceBaseUrl: string;
     originalSite: string;
@@ -306,7 +313,7 @@ export function filterCatalogItems(
   const sort = normalizeCatalogSort(input.sort ?? "updated");
   const order = normalizeCatalogSortOrder(input.order, sort);
   const limit = clampInt(input.limit, 24, 1, 100);
-  const offset = clampInt(input.offset, 0, 0, 5000);
+  const offset = clampInt(input.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const lowerSearch = search.toLowerCase();
 
   let filtered = items;

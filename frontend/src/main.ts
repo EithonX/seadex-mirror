@@ -23,7 +23,7 @@ import {
 } from "./constants";
 import { renderEntryContent, renderEntryError, renderEntryLoading, renderEntryNotFound } from "./entry-page";
 import { formatCatalogFormat, formatDate } from "./format";
-import { debounce, escapeHtml, isTypingTarget, query } from "./html";
+import { debounce, escapeHtml, isTypingTarget, query, safeExternalUrl } from "./html";
 import {
   renderChevronLeftIcon,
   renderChevronRightIcon,
@@ -123,6 +123,9 @@ applySavedTheme();
 
 boot().catch((error) => {
   appRoot.innerHTML = renderFatal(error);
+  document.querySelector<HTMLButtonElement>("[data-fatal-retry]")?.addEventListener("click", () => {
+    window.location.reload();
+  });
 });
 
 class FetchJsonError extends Error {
@@ -171,31 +174,35 @@ class InvalidJsonError extends FetchJsonError {
 async function boot() {
   const route = parseRoute(window.location.pathname);
   renderInitialRouteLoading(route);
-  const statusPromise = fetchJson<MirrorStatus>(`${DATA_ROOT}/status.json`);
+  const statusPromise = loadStatusSafe();
 
   if (route.kind === "entry") {
+    setDocumentMeta("SeaDex Mirror");
     const entryLoad = loadEntryPayload(route.alId);
     const status = await statusPromise;
     await renderEntry(status, route.alId, entryLoad.result, entryLoad.url);
     return;
   }
 
-  const status = await statusPromise;
-
-  switch (route.kind) {
-    case "index":
-      setDocumentMeta("SeaDex Mirror");
-      await renderCatalog(status);
-      return;
-    case "about":
-      setDocumentMeta("About | SeaDex Mirror");
-      renderAbout(status);
-      return;
-    case "sheet":
-      setDocumentMeta("Sheet | SeaDex Mirror");
-      await renderSheet(status);
-      return;
+  if (route.kind === "index") {
+    setDocumentMeta("SeaDex Mirror");
+    const catalogPromise = getCatalog();
+    const status = await statusPromise;
+    await renderCatalog(status, catalogPromise);
+    return;
   }
+
+  if (route.kind === "sheet") {
+    setDocumentMeta("Sheet | SeaDex Mirror");
+    const sheetRendererPromise = loadSheetRenderer();
+    const workbookPromise = loadSheetWorkbookPayload();
+    const status = await statusPromise;
+    await renderSheet(status, sheetRendererPromise, workbookPromise);
+    return;
+  }
+
+  setDocumentMeta("About | SeaDex Mirror");
+  renderAbout(await statusPromise);
 }
 
 function loadEntryPayload(alId: number) {
@@ -330,7 +337,10 @@ function parseRoute(pathname: string): RouteContext {
   return { kind: "entry", alId: Number(match[1]) };
 }
 
-async function renderCatalog(status: MirrorStatus) {
+async function renderCatalog(
+  status: MirrorStatus | null,
+  catalogPromise: Promise<CatalogIndexPayload> = getCatalog(),
+) {
   appRoot.innerHTML = renderPageFrame(
     "index",
     `
@@ -342,7 +352,7 @@ async function renderCatalog(status: MirrorStatus) {
   );
   wireCommonUi(status, "index");
 
-  const catalog = await getCatalog();
+  const catalog = await catalogPromise;
   const state = readCatalogStateFromUrl();
   const seasonOptions = buildSeasonOptions(catalog.items);
   const yearOptions = buildYearOptions(catalog.items);
@@ -680,7 +690,11 @@ async function renderCatalog(status: MirrorStatus) {
   renderPage();
 }
 
-async function renderSheet(status: MirrorStatus) {
+async function renderSheet(
+  status: MirrorStatus | null,
+  sheetRendererPromise: Promise<typeof import("./sheet-workbook")> = loadSheetRenderer(),
+  workbookPromise: Promise<SheetWorkbookPayload> = loadSheetWorkbookPayload(),
+) {
   document.body.classList.add("is-sheet-page");
 
   appRoot.innerHTML = renderPageFrame(
@@ -692,13 +706,11 @@ async function renderSheet(status: MirrorStatus) {
   );
   wireCommonUi(status, "sheet");
 
-  const sheetRendererPromise = loadSheetRenderer();
-  const workbookPromise = loadSheetWorkbookPayload();
   const [sheetRenderer, workbook] = await Promise.all([sheetRendererPromise, workbookPromise]);
   const state = readSheetWorkbookStateFromUrl(workbook, sheetRenderer.resolveSheetWorkbookSheet);
   let activeSheet = sheetRenderer.resolveSheetWorkbookSheet(workbook, state.tab);
   const creditLabel = workbook.credit?.label ?? "Original sheet by SeaSmoke#0002";
-  const creditUrl = workbook.credit?.url ?? null;
+  const creditUrl = safeExternalUrl(workbook.credit?.url ?? null);
 
   appRoot.innerHTML = renderPageFrame(
     "sheet",
@@ -810,8 +822,8 @@ async function renderSheet(status: MirrorStatus) {
   renderWorkbook();
 }
 
-function renderAbout(status: MirrorStatus) {
-  const rebuiltLabel = status.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : "Unknown";
+function renderAbout(status: MirrorStatus | null) {
+  const rebuiltLabel = status?.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : "Unavailable";
 
   appRoot.innerHTML = renderPageFrame(
     "about",
@@ -833,14 +845,14 @@ function renderAbout(status: MirrorStatus) {
                   <span class="stat-label-full">Mirrored entries</span>
                   <span class="stat-label-short">Entries</span>
                 </span>
-                <strong>${status.counts.entries.toLocaleString()}</strong>
+                <strong>${status ? status.counts.entries.toLocaleString() : "—"}</strong>
               </div>
               <div class="about-stat">
                 <span class="about-stat__label">
                   <span class="stat-label-full">Torrent rows</span>
                   <span class="stat-label-short">Torrents</span>
                 </span>
-                <strong>${status.counts.torrents.toLocaleString()}</strong>
+                <strong>${status ? status.counts.torrents.toLocaleString() : "—"}</strong>
               </div>
               <div class="about-stat">
                 <span class="about-stat__label">
@@ -933,16 +945,19 @@ function renderMaintainerProfileCard(input: {
   bio: string;
   profileUrl: string;
 }) {
+  const avatarUrl = safeExternalUrl(input.avatarUrl) ?? DEVELOPER_GITHUB_AVATAR_URL;
+  const profileUrl = safeExternalUrl(input.profileUrl) ?? DEVELOPER_GITHUB_URL;
+
   return `
     <div class="github-profile-card">
       <div class="github-profile-card__main">
-        <img class="github-profile-card__avatar" src="${escapeHtml(input.avatarUrl)}" alt="${escapeHtml(input.username)} avatar" />
+        <img class="github-profile-card__avatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(input.username)} avatar" />
         <div class="github-profile-card__info">
           <strong>@${escapeHtml(input.username)}</strong>
           <p>${escapeHtml(input.bio)}</p>
         </div>
       </div>
-      <a class="github-profile-card__footer" href="${escapeHtml(input.profileUrl)}" target="_blank" rel="noreferrer">
+      <a class="github-profile-card__footer" href="${escapeHtml(profileUrl)}" target="_blank" rel="noreferrer">
         <span class="github-profile-card__footer-icon">${renderGithubIcon()}</span>
         <span class="github-profile-card__footer-text">github.com/${escapeHtml(input.username)}</span>
       </a>
@@ -951,7 +966,7 @@ function renderMaintainerProfileCard(input: {
 }
 
 async function renderEntry(
-  status: MirrorStatus,
+  status: MirrorStatus | null,
   alId: number,
   entryResultPromise: Promise<EntryPayloadResult>,
   entryUrl: string,
@@ -981,7 +996,7 @@ async function renderEntry(
     appRoot.innerHTML = renderPageFrame(
       "entry",
       `
-        ${renderEntryContent(payload, status)}
+        ${renderEntryContent(payload)}
         ${renderSearchDialog()}
       `,
       status,
@@ -1036,13 +1051,16 @@ function renderFatal(error: unknown) {
       <div class="fatal__panel">
         <h1>Something slipped.</h1>
         <p>${escapeHtml(displayMessage)}</p>
-        <a class="comparison-link comparison-link--secondary" href="/">Return home</a>
+        <div class="fatal__actions">
+          <button class="comparison-link comparison-link--secondary fatal__retry" type="button" data-fatal-retry>Try again</button>
+          <a class="comparison-link comparison-link--secondary" href="/">Return home</a>
+        </div>
       </div>
     </main>
   `;
 }
 
-function wireCommonUi(status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
+function wireCommonUi(status: MirrorStatus | null, context: "index" | "entry" | "about" | "sheet") {
   wireThemeToggle();
   wireSearchDialog(status, context);
   wireEntryRetry();
@@ -1067,7 +1085,7 @@ function wireThemeToggle() {
   });
 }
 
-function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "about" | "sheet") {
+function wireSearchDialog(_status: MirrorStatus | null, context: "index" | "entry" | "about" | "sheet") {
   const dialog = document.querySelector<HTMLDivElement>("#search-dialog");
   const trigger = document.querySelector<HTMLButtonElement>("#global-search-trigger");
   const input = document.querySelector<HTMLInputElement>("#dialog-search-input");
@@ -1108,13 +1126,14 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
 
     results.innerHTML = payload.items.length
       ? payload.items
-          .map(
-            (item) => `
+          .map((item) => {
+            const posterUrl = safeExternalUrl(item.coverImage.extraLarge);
+            return `
               <a class="search-result" href="/${item.alId}">
                 <div class="search-result__poster">
                   ${
-                    item.coverImage.extraLarge
-                      ? `<img src="${escapeHtml(item.coverImage.extraLarge)}" alt="${escapeHtml(item.titles.display)} cover" />`
+                    posterUrl
+                      ? `<img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(item.titles.display)} cover" />`
                       : `<div class="poster-fallback poster-fallback--tiny">No art</div>`
                   }
                 </div>
@@ -1123,8 +1142,8 @@ function wireSearchDialog(_status: MirrorStatus, context: "index" | "entry" | "a
                   <div class="search-result__meta">${escapeHtml(formatCatalogFormat(item.format))} · ${item.startYear ?? item.seasonYear ?? "Unknown"} · ${item.episodes ?? "?"} ep</div>
                 </div>
               </a>
-            `,
-          )
+            `;
+          })
           .join("")
       : `
           <div class="search-empty">
@@ -1724,22 +1743,40 @@ function wireActiveFilterChips(controls: CatalogFilterControls) {
   });
 }
 
+async function loadStatusSafe(): Promise<MirrorStatus | null> {
+  try {
+    return await fetchJsonOnce<MirrorStatus>(`${DATA_ROOT}/status.json`, 2_000);
+  } catch (error) {
+    console.warn("Snapshot status metadata could not be loaded; continuing with core mirror data.", error);
+    return null;
+  }
+}
+
 async function getCatalog() {
   if (!cachedCatalogPromise) {
-    cachedCatalogPromise = fetchJson<CatalogIndexPayload>(`${DATA_ROOT}/catalog.json`);
+    cachedCatalogPromise = fetchJson<CatalogIndexPayload>(`${DATA_ROOT}/catalog.json`).catch((error: unknown) => {
+      cachedCatalogPromise = null;
+      throw error;
+    });
   }
   return cachedCatalogPromise;
 }
 
 async function loadSheetWorkbookPayload(): Promise<SheetWorkbookPayload> {
   if (!cachedSheetWorkbookPromise) {
-    cachedSheetWorkbookPromise = fetchJson<SheetWorkbookPayload>(`${DATA_ROOT}/sheet-workbook.json`);
+    cachedSheetWorkbookPromise = fetchJson<SheetWorkbookPayload>(`${DATA_ROOT}/sheet-workbook.json`).catch((error: unknown) => {
+      cachedSheetWorkbookPromise = null;
+      throw error;
+    });
   }
   return cachedSheetWorkbookPromise;
 }
 
 function loadSheetRenderer() {
-  cachedSheetRendererPromise ??= import("./sheet-workbook");
+  cachedSheetRendererPromise ??= import("./sheet-workbook").catch((error: unknown) => {
+    cachedSheetRendererPromise = null;
+    throw error;
+  });
   return cachedSheetRendererPromise;
 }
 
@@ -1767,7 +1804,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   throw new Error(`Failed loading ${url}.`);
 }
 
-async function fetchJsonOnce<T>(url: string): Promise<T> {
+async function fetchJsonOnce<T>(url: string, timeoutMs = FETCH_JSON_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
   let didTimeout = false;
   const timeout = window.setTimeout(() => {

@@ -15,19 +15,25 @@
     "typecheck": "tsc -p tsconfig.frontend.json --noEmit",
     "verify:deployed-site": "node scripts/verify-deployed-site.mjs",
     "verify:frontend-build": "node scripts/verify-frontend-build.mjs",
-    "verify:mirror-data": "node scripts/verify-mirror-data.mjs"
+    "verify:mirror-data": "node scripts/verify-mirror-data.mjs",
+    "test": "node --test test/*.test.mjs",
+    "verify": "npm run typecheck && npm test",
+    "verify:pages-limits": "node scripts/verify-pages-limits.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
-    "typescript": "latest",
-    "vite": "^7.3.6",
-    "wrangler": "^4.120.0"
+    "@cloudflare/workers-types": "5.20260813.1",
+    "typescript": "6.0.3",
+    "vite": "7.3.6",
+    "wrangler": "4.120.0"
   },
   "dependencies": {
-    "exceljs": "^4.4.0"
+    "exceljs": "4.4.0"
   },
   "overrides": {
     "uuid": "11.1.1",
-    "sharp": "^0.35.0"
+    "sharp": "0.35.3"
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

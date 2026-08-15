@@ -1502,6 +1502,25 @@ img {
   font-size: 0.65rem;
 }
 
+.snapshot-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  font-family: "IBM Plex Mono", SFMono-Regular, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0;
+}
+
+.snapshot-badge--unknown {
+  font-family: inherit;
+  color: var(--muted);
+}
+
 @media (max-width: 600px) {
   .site-footer {
     padding: 0.85rem 0;
@@ -4505,6 +4524,19 @@ img {
   padding: 0.6rem 1rem;
   font-size: 0.85rem;
   border-radius: var(--radius-sm);
+}
+
+.fatal__actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.fatal__retry {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
 }
 
 @media (max-width: 600px) {

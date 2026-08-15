@@ -1,4 +1,4 @@
-import type { EntryPayload, MirrorStatus } from "../../shared/mirror";
+import type { EntryPayload } from "../../shared/mirror";
 import {
   capitalize,
   formatBytes,
@@ -7,7 +7,7 @@ import {
   formatRelationType,
   formatSeriesLabel,
 } from "./format";
-import { escapeHtml } from "./html";
+import { escapeHtml, safeExternalUrl } from "./html";
 import {
   renderCalendarIcon,
   renderCalendarPlusIcon,
@@ -16,6 +16,8 @@ import {
   renderPrivateTrackerIcon,
   renderTrackerIcon,
 } from "./icons";
+
+const TORRENT_LINK_PROTOCOLS = new Set(["https:", "http:", "magnet:"]);
 
 const UPSTREAM_TRACKER_ORDER = [
   "Nyaa",
@@ -41,8 +43,9 @@ type TorrentAction = {
   isPrivate: boolean;
 };
 
-export function renderEntryContent(payload: EntryPayload, status: MirrorStatus): string {
+export function renderEntryContent(payload: EntryPayload): string {
   const entry = payload.entry;
+  const posterUrl = safeExternalUrl(entry.coverImage.extraLarge);
 
   return `
     <main class="page page--entry">
@@ -61,8 +64,8 @@ export function renderEntryContent(payload: EntryPayload, status: MirrorStatus):
           <section class="entry-hero">
             <div class="entry-hero__poster">
               ${
-                entry.coverImage.extraLarge
-                  ? `<img src="${escapeHtml(entry.coverImage.extraLarge)}" alt="${escapeHtml(entry.titles.display)} cover" />`
+                posterUrl
+                  ? `<img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(entry.titles.display)} cover" />`
                   : `<div class="poster-fallback">No poster art was included in the snapshot.</div>`
               }
             </div>
@@ -106,10 +109,7 @@ export function renderEntryContent(payload: EntryPayload, status: MirrorStatus):
           <section class="sidebar-section">
             <h3>Links</h3>
             <div class="sidebar-stack sidebar-stack--links">
-              <a class="comparison-link comparison-link--secondary" href="${escapeHtml(payload.source.originalEntryUrl)}" target="_blank" rel="noreferrer">
-                <img src="/favicon.png" alt="SeaDex" />
-                <span>SeaDex</span>
-              </a>
+              ${renderExternalSiteLink(payload.source.originalEntryUrl, "/favicon.png", "SeaDex")}
               <a class="comparison-link comparison-link--secondary" href="https://anilist.co/anime/${entry.alId}" target="_blank" rel="noreferrer">
                 <img src="/anilist.svg" alt="AniList" />
                 <span>AniList</span>
@@ -220,6 +220,8 @@ function renderComparisonsSection(links: string[]) {
       <h3>Comparisons</h3>
       <div class="sidebar-stack">
         ${links
+          .map((link) => safeExternalUrl(link))
+          .filter((link): link is string => Boolean(link))
           .map(
             (link) => `
               <a class="comparison-link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer">
@@ -360,8 +362,9 @@ function collectTrackerActions(tracker: string, torrents: EntryPayload["torrents
 function renderTrackerAction(action: TorrentAction): string {
   const label = escapeHtml(action.buttonLabel);
 
-  if (action.href) {
-    return `<a class="torrent-button" href="${escapeHtml(action.href)}" target="_blank" rel="noreferrer">${renderTrackerIcon(action.tracker || action.buttonLabel)} ${label}</a>`;
+  const safeHref = safeExternalUrl(action.href, TORRENT_LINK_PROTOCOLS);
+  if (safeHref) {
+    return `<a class="torrent-button" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${renderTrackerIcon(action.tracker || action.buttonLabel)} ${label}</a>`;
   }
 
   if (action.isPrivate) {
@@ -395,8 +398,9 @@ function renderTrackerActionMenu(tracker: string, actions: TorrentAction[]): str
 function renderTrackerActionMenuItem(action: TorrentAction) {
   const label = escapeHtml(action.menuLabel);
 
-  if (action.href) {
-    return `<a class="torrent-menu__item" href="${escapeHtml(action.href)}" target="_blank" rel="noreferrer">${label}</a>`;
+  const safeHref = safeExternalUrl(action.href, TORRENT_LINK_PROTOCOLS);
+  if (safeHref) {
+    return `<a class="torrent-menu__item" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${label}</a>`;
   }
 
   if (action.isPrivate) {
@@ -488,12 +492,13 @@ function renderRelationsSection(relations: EntryPayload["entry"]["relations"]) {
     .map((relation) => {
       const node = relation.node!;
       const title = node.title?.english ?? node.title?.userPreferred ?? String(node.id);
+      const posterUrl = safeExternalUrl(node.coverImage?.extraLarge);
       return `
         <a href="/${node.id}" class="relation-card">
           <div class="relation-card__poster">
             ${
-              node.coverImage?.extraLarge
-                ? `<img src="${escapeHtml(node.coverImage.extraLarge)}" alt="${escapeHtml(title)} cover" />`
+              posterUrl
+                ? `<img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(title)} cover" />`
                 : `<div class="poster-fallback poster-fallback--small">No art</div>`
             }
           </div>
@@ -527,6 +532,19 @@ function renderRelationsSection(relations: EntryPayload["entry"]["relations"]) {
   `;
 }
 
+function renderExternalSiteLink(urlValue: string, iconSrc: string, label: string) {
+  const url = safeExternalUrl(urlValue);
+  if (!url) {
+    return "";
+  }
+  return `
+    <a class="comparison-link comparison-link--secondary" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+      <img src="${escapeHtml(iconSrc)}" alt="${escapeHtml(label)}" />
+      <span>${escapeHtml(label)}</span>
+    </a>
+  `;
+}
+
 function renderRelationChip(label: string) {
   return `<span class="relation-chip">${escapeHtml(label)}</span>`;
 }
@@ -536,7 +554,9 @@ function classifyTorrentLinks(torrent: EntryPayload["torrents"][number], preferG
     preferGrouped
       ? [torrent.groupedUrl, torrent.sourceGroupedUrl, torrent.url, torrent.sourceUrl]
       : [torrent.url, torrent.sourceUrl, torrent.groupedUrl, torrent.sourceGroupedUrl]
-  ).filter(Boolean) as string[];
+  ).filter(Boolean)
+    .map((url) => safeExternalUrl(url, TORRENT_LINK_PROTOCOLS))
+    .filter((url): url is string => Boolean(url));
   const publicUrl = candidates.find((url) => !isPrivateTrackerUrl(url)) ?? null;
   const privateUrl = candidates.find((url) => isPrivateTrackerUrl(url)) ?? null;
   const trackerIsPrivate = isPrivateTrackerName(torrent.tracker);

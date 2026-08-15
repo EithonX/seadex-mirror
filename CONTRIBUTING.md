@@ -1,41 +1,66 @@
 # Contributing
 
-This is an unofficial mirror of [SeaDex](https://releases.moe). If your issue is with the upstream data (wrong entries, missing torrents, etc.), report it to the [original project](https://github.com/seadex-moe/seadex) instead.
+SeaDex Mirror is an unofficial static mirror of [SeaDex](https://releases.moe). Problems with the underlying recommendations or upstream records should normally be reported to the [SeaDex project](https://github.com/seadex-moe/seadex), not corrected by silently forking the data here.
 
 ## Setup
+
+Use Node.js 24.x and the committed lockfile:
 
 ```bash
 git clone https://github.com/EithonX/seadex-mirror.git
 cd seadex-mirror
-npm install
+npm ci
 ```
 
-To run the dev server with live data:
+Generate live mirror data when your change needs it:
 
 ```bash
 npm run data:build
 npm run dev
 ```
 
-`data:build` fetches live data from SeaDex and AniList. It works without API keys, though you may hit AniList rate limits without an `ANILIST_ACCESS_TOKEN` set in `.env`.
+The data build works without API credentials. An optional `ANILIST_ACCESS_TOKEN` may be supplied for AniList requests.
 
-## Submitting changes
+## Before opening a pull request
 
-1. Fork the repo and create a branch off `main`
-2. Make your changes
-3. Run `npm run typecheck` to catch type errors
-4. Open a pull request
+Run the deterministic checks that do not require upstream access:
 
-Keep PRs focused — one feature or fix per PR.
+```bash
+npm run verify
+```
 
-## What's in scope
+For changes to the data pipeline, generated schema, frontend build, or deployment behavior, also run the relevant end-to-end checks with a generated snapshot:
 
-- Frontend improvements (UI, accessibility, performance)
-- Build script fixes and optimizations
-- Documentation
-- CI and deployment improvements
+```bash
+npm run data:build
+npm run verify:mirror-data
+npm run build:frontend
+npm run verify:frontend-build
+npm run verify:pages-limits
+```
 
-## What's out of scope
+A data-pipeline bug fix should include a regression test whenever the affected logic can be isolated without live network access.
 
-- Changes to the upstream SeaDex data format — those go to [seadex-moe/seadex](https://github.com/seadex-moe/seadex)
-- Features that require a server-side runtime — the architecture is intentionally static
+## Engineering constraints
+
+These are intentional project properties, not implementation accidents:
+
+- Keep the public site fully static.
+- Do not introduce a database, paid storage dependency, server process, or Pages Function for work that can be solved during the build.
+- Never weaken source parity, manifest verification, atomic replacement, or deployment verification to make a flaky build appear green.
+- Preserve the previous known-good snapshot when an upstream dependency is incomplete or unavailable.
+- Treat upstream/workbook/AniList strings as untrusted when they cross into HTML or URLs.
+- Keep dependencies and GitHub Actions reproducible; CI uses `npm ci` and Actions are pinned by commit SHA.
+- Keep changes focused and readable. Avoid generated-code churn unrelated to the change.
+
+## Pull requests
+
+1. Branch from `main`.
+2. Make the smallest coherent change that solves the problem completely.
+3. Add/update tests and documentation where behavior changes.
+4. Run the applicable verification commands above.
+5. Open a pull request describing the behavior change and how it was verified.
+
+## Security issues
+
+Follow [SECURITY.md](SECURITY.md). Do not place sensitive vulnerability details in a public issue or pull request.

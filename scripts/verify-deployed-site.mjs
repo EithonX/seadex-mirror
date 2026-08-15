@@ -1,192 +1,205 @@
-const MAX_ATTEMPTS = 5;
-const RETRY_DELAY_MS = 2000;
-const REQUEST_TIMEOUT_MS = 15000;
+import { readResponseBuffer } from "./lib/http.mjs";
+import { sha256Buffer, validateSnapshotManifest } from "./lib/snapshot-integrity.mjs";
 
-function logInfo(msg) {
-  console.log(`INFO: ${msg}`);
-}
+const MAX_ATTEMPTS = positiveInt(process.env.DEPLOY_VERIFY_ATTEMPTS, 6);
+const RETRY_DELAY_MS = positiveInt(process.env.DEPLOY_VERIFY_DELAY_MS, 2_000);
+const REQUEST_TIMEOUT_MS = positiveInt(process.env.DEPLOY_VERIFY_TIMEOUT_MS, 15_000);
+const EXPECTED_SNAPSHOT_ID = (process.env.EXPECTED_SNAPSHOT_ID ?? "").trim();
+const EXPECTED_MANIFEST_SHA256 = (process.env.EXPECTED_MANIFEST_SHA256 ?? "").trim();
+const MAX_HTML_BYTES = 2 * 1024 * 1024;
+const MAX_JSON_BYTES = 64 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+const REQUIRED_MANIFEST_PATHS = ["status.json", "catalog.json", "sheet.json", "sheet-workbook.json", "anilist-cache.json"];
 
-function logSuccess(msg) {
-  console.log(`OK: ${msg}`);
-}
+async function main() {
+  validateExpectedIdentity();
+  const baseUrl = getBaseUrl();
 
-function logWarning(msg) {
-  console.log(`WARN: ${msg}`);
-}
+  console.log("=== Deployed Site Verification ===");
+  console.log(`INFO: Base URL: ${baseUrl}`);
+  if (EXPECTED_SNAPSHOT_ID) {
+    console.log(`INFO: Expected snapshot: ${EXPECTED_SNAPSHOT_ID.slice(0, 12)}`);
+  }
 
-function logError(msg) {
-  console.error(`ERROR: ${msg}`);
-}
+  for (const path of ["/", "/about", "/sheet"]) {
+    await retryCheck(path, async () => {
+      const response = await fetchResponse(`${baseUrl}${path}`);
+      assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+      assert((response.headers.get("content-type") ?? "").includes("text/html"), "expected text/html");
+      const text = (await readResponseBuffer(response, { maxBytes: MAX_HTML_BYTES, label: path })).toString("utf8");
+      assert(text.includes("SeaDex") || text.includes('id="app"'), "app shell marker missing");
+    });
+    console.log(`OK: ${path} serves the app shell.`);
+  }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const manifestResult = await retryCheck("/mirror-data/manifest.json", async () => {
+    const response = await fetchResponse(`${baseUrl}/mirror-data/manifest.json`);
+    assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+    const bytes = await readResponseBuffer(response, {
+      maxBytes: MAX_MANIFEST_BYTES,
+      label: "deployed manifest.json",
+    });
+    const manifest = parseJson(bytes.toString("utf8"), "manifest.json");
+    validateManifest(manifest);
+
+    const digest = sha256Buffer(bytes);
+    if (EXPECTED_MANIFEST_SHA256) {
+      assert(digest === EXPECTED_MANIFEST_SHA256, "remote manifest SHA-256 differs from the built artifact");
+    }
+    if (EXPECTED_SNAPSHOT_ID) {
+      assert(
+        manifest.snapshotId === EXPECTED_SNAPSHOT_ID,
+        `manifest snapshot ${manifest.snapshotId} != expected ${EXPECTED_SNAPSHOT_ID}`,
+      );
+    }
+
+    return {
+      manifest,
+      hasCacheControl: Boolean(response.headers.get("cache-control")),
+    };
+  });
+  console.log(`OK: manifest.json identifies snapshot ${manifestResult.manifest.snapshotId.slice(0, 12)}.`);
+
+  const manifestByPath = new Map(manifestResult.manifest.files.map((file) => [file.path, file]));
+  const samplePaths = selectVerificationSample(manifestResult.manifest.files);
+  let responsesWithCacheControl = manifestResult.hasCacheControl ? 1 : 0;
+  let checkedCacheHeaders = 1;
+
+  for (const path of samplePaths) {
+    const expected = manifestByPath.get(path);
+    assert(expected, `manifest sample path disappeared: ${path}`);
+
+    const result = await retryCheck(`/mirror-data/${path}`, async () => {
+      const response = await fetchResponse(`${baseUrl}/mirror-data/${encodePath(path)}`);
+      assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+      const bytes = await readResponseBuffer(response, {
+        maxBytes: Math.min(MAX_JSON_BYTES, expected.bytes + 1),
+        label: `deployed ${path}`,
+      });
+      assert(bytes.length === expected.bytes, `size ${bytes.length} != manifest ${expected.bytes}`);
+      assert(sha256Buffer(bytes) === expected.sha256, "SHA-256 differs from manifest");
+      return { hasCacheControl: Boolean(response.headers.get("cache-control")) };
+    });
+
+    checkedCacheHeaders += 1;
+    if (result.hasCacheControl) responsesWithCacheControl += 1;
+    console.log(`OK: ${path} matches the manifest.`);
+  }
+
+  const status = await fetchJsonWithRetry(`${baseUrl}/mirror-data/status.json`, "status.json", 2 * 1024 * 1024);
+  if (EXPECTED_SNAPSHOT_ID) {
+    assert(status?.snapshot?.id === EXPECTED_SNAPSHOT_ID, "status.json snapshot ID differs from expected snapshot");
+  }
+  assert(status?.snapshot?.id === manifestResult.manifest.snapshotId, "status.json snapshot ID differs from manifest");
+  assert(
+    status?.snapshot?.sourceFingerprint === manifestResult.manifest.sourceFingerprint,
+    "status.json source fingerprint differs from manifest",
+  );
+
+  if (responsesWithCacheControl === 0 && checkedCacheHeaders > 0) {
+    throw new Error("Cache-Control is missing from every checked mirror-data response.");
+  }
+
+  console.log(
+    `OK: deployed snapshot ${manifestResult.manifest.snapshotId.slice(0, 12)} passed exact-manifest smoke verification.`,
+  );
 }
 
 function getBaseUrl() {
-  const explicit = (process.env.DEPLOYED_SITE_URL || '').trim();
-  if (explicit) {
-    return explicit.replace(/\/+$/, '');
+  const explicit = (process.env.DEPLOYED_SITE_URL ?? "").trim();
+  const candidate = explicit || `https://${(process.env.CLOUDFLARE_PAGES_PROJECT_NAME ?? "").trim() || "seadex"}.pages.dev`;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch (error) {
+    throw new Error(`Invalid deployed site URL: ${message(error)}`, { cause: error });
   }
-  const project = (process.env.CLOUDFLARE_PAGES_PROJECT_NAME || '').trim() || 'seadex';
-  return `https://${project}.pages.dev`.replace(/\/+$/, '');
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Unsupported deployed site protocol: ${url.protocol}`);
+  }
+  url.hash = "";
+  url.search = "";
+  return url.toString().replace(/\/+$/u, "");
 }
 
-async function fetchOnce(url) {
-  const response = await fetch(url, {
-    redirect: 'follow',
+function selectVerificationSample(files) {
+  const required = [...REQUIRED_MANIFEST_PATHS];
+  const entryFiles = files
+    .filter((file) => /^entries\/\d+\.json$/u.test(file.path))
+    .sort((left, right) => Number(left.path.match(/\d+/u)?.[0]) - Number(right.path.match(/\d+/u)?.[0]));
+
+  assert(entryFiles.length > 0, "manifest contains no entry JSON files");
+  required.push(entryFiles[0].path, entryFiles[Math.floor(entryFiles.length / 2)].path, entryFiles.at(-1).path);
+  return [...new Set(required)];
+}
+
+async function fetchJsonWithRetry(url, label, maxBytes) {
+  return retryCheck(label, async () => {
+    const response = await fetchResponse(url);
+    assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+    const bytes = await readResponseBuffer(response, { maxBytes, label });
+    return parseJson(bytes.toString("utf8"), label);
+  });
+}
+
+async function fetchResponse(url) {
+  return fetch(url, {
+    redirect: "follow",
+    headers: { "cache-control": "no-cache" },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  const text = await response.text();
-  return { response, text };
 }
 
-// Retry the whole check (network errors AND validation failures) up to
-// MAX_ATTEMPTS, so slow post-deploy propagation does not fail the run.
-async function retryCheck(label, checkFn) {
-  let lastError;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+async function retryCheck(label, work) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await checkFn();
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      return await work();
+    } catch (error) {
+      lastError = error;
       if (attempt < MAX_ATTEMPTS) {
-        logWarning(`Attempt ${attempt}/${MAX_ATTEMPTS} failed for ${label}: ${lastError}. Retrying in ${RETRY_DELAY_MS} ms...`);
+        console.warn(`WARN: ${label} attempt ${attempt}/${MAX_ATTEMPTS} failed: ${message(error)}. Retrying...`);
         await sleep(RETRY_DELAY_MS);
       }
     }
   }
-  throw new Error(`${label} failed after ${MAX_ATTEMPTS} attempts: ${lastError}`);
+  throw new Error(`${label} failed after ${MAX_ATTEMPTS} attempts: ${message(lastError)}`);
 }
 
-function parseJsonSafe(text) {
+function validateExpectedIdentity() {
+  if (EXPECTED_SNAPSHOT_ID && !isSha256(EXPECTED_SNAPSHOT_ID)) {
+    throw new Error("EXPECTED_SNAPSHOT_ID must be a lowercase SHA-256 hex digest.");
+  }
+  if (EXPECTED_MANIFEST_SHA256 && !isSha256(EXPECTED_MANIFEST_SHA256)) {
+    throw new Error("EXPECTED_MANIFEST_SHA256 must be a lowercase SHA-256 hex digest.");
+  }
+}
+
+function validateManifest(manifest) {
   try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch {
-    return { ok: false, value: null };
+    validateSnapshotManifest(manifest);
+  } catch (error) {
+    throw new Error(`deployed manifest is invalid: ${message(error)}`, { cause: error });
+  }
+
+  const seen = new Set(manifest.files.map((file) => file.path));
+  for (const file of manifest.files) {
+    assert(file.bytes <= MAX_JSON_BYTES, `manifest size exceeds verifier safety limit for ${file.path}`);
+  }
+  for (const path of REQUIRED_MANIFEST_PATHS) {
+    assert(seen.has(path), `manifest is missing required file ${path}`);
   }
 }
 
-async function checkHtmlRoute(baseUrl, path, failures) {
-  const url = `${baseUrl}${path}`;
-  try {
-    await retryCheck(path, async () => {
-      const { response, text } = await fetchOnce(url);
-      const contentType = response.headers.get('content-type') || '';
+function encodePath(path) { return path.split("/").map(encodeURIComponent).join("/"); }
+function parseJson(text, label) { try { return JSON.parse(text); } catch { throw new Error(`${label} is not valid JSON`); } }
+function isSha256(value) { return /^[a-f0-9]{64}$/u.test(String(value ?? "")); }
+function assert(condition, messageText) { if (!condition) throw new Error(messageText); }
+function positiveInt(value, fallback) { const parsed = Number.parseInt(String(value ?? ""), 10); return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback; }
+function sleep(ms) { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)); }
+function message(error) { return error instanceof Error ? error.message : String(error); }
 
-      if (response.status !== 200) {
-        throw new Error(`expected HTTP 200, got ${response.status}.`);
-      }
-      if (!contentType.includes('text/html')) {
-        throw new Error(`expected text/html content-type, got "${contentType}".`);
-      }
-      if (!text.includes('SeaDex') && !text.includes('id="app"')) {
-        throw new Error('app shell marker not found in HTML body.');
-      }
-    });
-  } catch (err) {
-    failures.push(`${path}: ${err instanceof Error ? err.message : String(err)}`);
-    logError(`${path} failed HTML check.`);
-    return;
-  }
-
-  logSuccess(`${path} serves the app shell (HTTP 200, text/html).`);
-}
-
-async function checkJsonRoute(baseUrl, path, validate, failures, cacheState) {
-  const url = `${baseUrl}${path}`;
-  let response;
-  try {
-    response = await retryCheck(path, async () => {
-      const result = await fetchOnce(url);
-      const contentType = result.response.headers.get('content-type') || '';
-
-      if (result.response.status !== 200) {
-        throw new Error(`expected HTTP 200, got ${result.response.status}.`);
-      }
-
-      const parsed = parseJsonSafe(result.text);
-      const looksJson = contentType.includes('application/json') || parsed.ok;
-      if (!looksJson || !parsed.ok) {
-        throw new Error(`response did not parse as JSON (content-type "${contentType}").`);
-      }
-
-      const validationError = validate(parsed.value);
-      if (validationError) {
-        throw new Error(validationError);
-      }
-
-      return result.response;
-    });
-  } catch (err) {
-    failures.push(`${path}: ${err instanceof Error ? err.message : String(err)}`);
-    logError(`${path} failed JSON check.`);
-    return;
-  }
-
-  // Cache-control observation (non-fatal per route), only after a valid response.
-  cacheState.total += 1;
-  const cacheControl = response.headers.get('cache-control');
-  if (cacheControl) {
-    cacheState.withCacheControl += 1;
-  } else {
-    logWarning(`${path} is missing a Cache-Control header.`);
-  }
-
-  logSuccess(`${path} serves valid JSON.`);
-}
-
-async function main() {
-  const baseUrl = getBaseUrl();
-  console.log('=== Deployed Site Smoke Verification ===');
-  logInfo(`Base URL: ${baseUrl}`);
-
-  const failures = [];
-  const cacheState = { total: 0, withCacheControl: 0 };
-
-  const htmlRoutes = ['/', '/about', '/sheet'];
-  for (const path of htmlRoutes) {
-    await checkHtmlRoute(baseUrl, path, failures);
-  }
-
-  await checkJsonRoute(
-    baseUrl,
-    '/mirror-data/status.json',
-    (data) => (data && typeof data === 'object' && !Array.isArray(data) ? null : 'expected a JSON object.'),
-    failures,
-    cacheState,
-  );
-  await checkJsonRoute(
-    baseUrl,
-    '/mirror-data/catalog.json',
-    (data) => (data && Array.isArray(data.items) ? null : 'expected an "items" array.'),
-    failures,
-    cacheState,
-  );
-  await checkJsonRoute(
-    baseUrl,
-    '/mirror-data/sheet-workbook.json',
-    (data) => (data && Array.isArray(data.sheets) ? null : 'expected a "sheets" array.'),
-    failures,
-    cacheState,
-  );
-
-  // Fail only if Cache-Control is obviously absent on ALL JSON routes.
-  if (cacheState.total > 0 && cacheState.withCacheControl === 0) {
-    failures.push('Cache-Control header is missing on all JSON routes.');
-    logError('No JSON route returned a Cache-Control header.');
-  }
-
-  console.log('');
-  if (failures.length > 0) {
-    logError(`Smoke verification failed with ${failures.length} issue(s):`);
-    for (const f of failures) {
-      console.error(`  - ${f}`);
-    }
-    process.exit(1);
-  }
-
-  logSuccess('All deployed-site smoke checks passed.');
-  process.exit(0);
-}
-
-main();
+main().catch((error) => {
+  console.error(`ERROR: ${message(error)}`);
+  process.exitCode = 1;
+});
