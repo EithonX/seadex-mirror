@@ -467,6 +467,8 @@ async function renderCatalog(
                 <button id="catalog-prev" class="ghost-icon-button" type="button" aria-label="Go to previous page">${renderChevronLeftIcon()}</button>
                 <button id="catalog-next" class="ghost-icon-button" type="button" aria-label="Go to next page">${renderChevronRightIcon()}</button>
                 <button id="catalog-last" class="ghost-icon-button ghost-icon-button--desktop" type="button" aria-label="Go to last page">${renderDoubleChevronRightIcon()}</button>
+              </div>
+            </div>
           </div>
         </section>
       </main>
