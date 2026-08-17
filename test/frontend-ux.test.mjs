@@ -15,14 +15,16 @@ test("private tracker actions use tracker-aware source resolution and stay click
   assert.doesNotMatch(source, /isPrivateTrackerUrl/u);
 });
 
-test("mobile footer keeps statistics together and moves snapshot verification to its own row", async () => {
+test("mobile footer presents a clean two-line layout with brand attribution and mirror statistics", async () => {
   const shell = normalizeNewlines(await readFile(new URL("../frontend/src/app-shell.ts", import.meta.url), "utf8"));
   const styles = normalizeNewlines(await readFile(new URL("../frontend/src/styles.css", import.meta.url), "utf8"));
 
-  assert.match(shell, /<div class="site-footer__stats">[\s\S]*?<\/div>[\s\S]*?<div class="site-footer__verification">/u);
-  assert.match(styles, /@media \(max-width: 600px\)[\s\S]*?\.site-footer__right \{[\s\S]*?flex-direction: column;/u);
+  assert.match(shell, /<div class="site-footer__left">[\s\S]*?<\/div>[\s\S]*?<div class="site-footer__right">/u);
+  assert.match(shell, /<div class="site-footer__stats">/u);
+  assert.doesNotMatch(shell, /site-footer__verification/u);
+  assert.doesNotMatch(shell, /snapshot-badge/u);
+  assert.match(styles, /@media \(max-width: 600px\)[\s\S]*?\.site-footer__inner \{[\s\S]*?flex-direction: column;/u);
   assert.match(styles, /\.site-footer__stats \{[\s\S]*?white-space: nowrap;/u);
-  assert.match(styles, /\.site-footer__verification \.stat-sep \{\n\s+display: none;/u);
 });
 
 test("unlocking private tracker links preserves the two-column tracker action layout", async () => {

@@ -48,7 +48,6 @@ function renderShell(context: PageContext) {
 
 export function renderSiteFooter(status?: MirrorStatus | null) {
   const updatedDate = status?.sync.lastRebuildFinishedAt ? formatDate(status.sync.lastRebuildFinishedAt) : null;
-  const snapshotLabel = status?.snapshot?.id ? status.snapshot.id.slice(0, 12) : null;
 
   return `
     <footer class="site-footer">
@@ -67,13 +66,8 @@ export function renderSiteFooter(status?: MirrorStatus | null) {
                   <span class="stat-group"><strong class="stat-num">${status.counts.torrents.toLocaleString()}</strong> torrents</span>
                   ${updatedDate ? `<span class="stat-sep stat-sep--time">&bull;</span><span class="stat-group stat-group--time">Updated ${escapeHtml(updatedDate)}</span>` : ""}
                 </div>
-                ${
-                  snapshotLabel
-                    ? `<div class="site-footer__verification"><span class="stat-sep stat-sep--snapshot">&bull;</span><span class="snapshot-badge" title="Verified content snapshot ${escapeHtml(status.snapshot.id)}">Verified ${escapeHtml(snapshotLabel)}</span></div>`
-                    : ""
-                }
               `
-              : `<div class="site-footer__verification site-footer__verification--standalone"><span class="snapshot-badge snapshot-badge--unknown" title="Freshness metadata could not be loaded. Core mirror data can still be browsed.">Snapshot status unavailable</span></div>`
+              : ""
           }
         </div>
       </div>

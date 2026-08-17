@@ -1485,15 +1485,10 @@ img {
   font-size: 0.8rem;
 }
 
-.site-footer__stats,
-.site-footer__verification {
+.site-footer__stats {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.site-footer__verification:not(.site-footer__verification--standalone) {
-  padding-left: 0.5rem;
 }
 
 .stat-group {
@@ -1513,25 +1508,6 @@ img {
   font-size: 0.65rem;
 }
 
-.snapshot-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.35rem;
-  padding: 0.12rem 0.42rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted-strong);
-  background: color-mix(in srgb, var(--card) 88%, transparent);
-  font-family: "IBM Plex Mono", SFMono-Regular, monospace;
-  font-size: 0.68rem;
-  letter-spacing: 0;
-}
-
-.snapshot-badge--unknown {
-  font-family: inherit;
-  color: var(--muted);
-}
-
 @media (max-width: 600px) {
   .site-footer {
     margin-top: 1rem;
@@ -1542,40 +1518,19 @@ img {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
   }
 
   .site-footer__right {
     width: 100%;
-    flex-direction: column;
     justify-content: center;
-    font-size: 0.74rem;
-    gap: 0.22rem;
-    flex-wrap: nowrap;
+    font-size: 0.76rem;
   }
 
   .site-footer__stats {
     justify-content: center;
     gap: 0.35rem;
     white-space: nowrap;
-  }
-
-  .site-footer__verification,
-  .site-footer__verification:not(.site-footer__verification--standalone) {
-    justify-content: center;
-    padding-left: 0;
-  }
-
-  .site-footer__verification .stat-sep {
-    display: none;
-  }
-
-  .site-footer__verification .snapshot-badge {
-    min-height: 1.15rem;
-    padding: 0.05rem 0.35rem;
-    font-size: 0.61rem;
-    color: var(--muted);
-    background: transparent;
   }
 
   .stat-group--time,
