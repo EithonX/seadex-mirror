@@ -27,7 +27,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260831.1",
     "typescript": "6.0.3",
-    "vite": "7.3.6",
+    "vite": "7.3.7",
     "wrangler": "4.127.1"
   },
   "dependencies": {
