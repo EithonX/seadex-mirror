@@ -837,7 +837,7 @@ function renderAbout(status: MirrorStatus | null) {
               <p class="sheet-kicker">About</p>
               <h1>SeaDex Mirror</h1>
               <p class="about-lead">
-                This is a backup mirror of releases.moe in case the original site is down, slow, or temporarily unavailable. The goal is to keep the public data readable and easy to access, not to replace the upstream project.
+                This is a backup mirror of seadex.moe in case the original site is down, slow, or temporarily unavailable. The goal is to keep the public data readable and easy to access, not to replace the upstream project.
               </p>
             </div>
 
@@ -874,7 +874,7 @@ function renderAbout(status: MirrorStatus | null) {
               </div>
               <div class="about-block">
                 <h2>Who to credit</h2>
-                <p>SeaDex a.k.a releases.moe is the original source. The recommendations, notes, and torrent information come from them. This mirror only republishes public-facing data with proper credits. Again, kudos to them.</p>
+                <p>SeaDex (seadex.moe) is the original source. The recommendations, notes, and torrent information come from them. This mirror only republishes public-facing data with proper credits. Again, kudos to them.</p>
               </div>
               <div class="about-block">
                 <h2>Maintainer</h2>
@@ -892,7 +892,7 @@ function renderAbout(status: MirrorStatus | null) {
                 <p>If you want the original site or its own About page, use the links below.</p>
                 <div class="upstream-links-row">
                   <a href="${escapeHtml(UPSTREAM_SITE_URL)}" target="_blank" rel="noreferrer" class="upstream-text-link">
-                    <span>releases.moe</span>
+                    <span>seadex.moe</span>
                     <span class="upstream-text-link__arrow">&nearr;</span>
                   </a>
                   <span class="upstream-links-sep">&bull;</span>
