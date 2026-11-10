@@ -4,7 +4,7 @@
 [![Mirror Rebuild](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/rebuild-mirror.yml?branch=main&label=mirror%20rebuild)](https://github.com/EithonX/seadex-mirror/actions/workflows/rebuild-mirror.yml)
 [![Deploy](https://img.shields.io/github/actions/workflow/status/EithonX/seadex-mirror/deploy-site.yml?branch=main&label=deploy)](https://github.com/EithonX/seadex-mirror/actions/workflows/deploy-site.yml)
 
-An unofficial static mirror of [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)), the anime release recommendation index. Built so the data stays accessible even when the original is unavailable.
+An unofficial static mirror of [SeaDex](https://seadex.moe) ([source](https://github.com/seadex-moe/seadex)), the anime release recommendation index. Built so the data stays accessible even when the original is unavailable.
 
 **Primary:** [seadex.pages.dev](https://seadex.pages.dev) · **Backup:** [seadex.surge.sh](https://seadex.surge.sh)
 
@@ -146,7 +146,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [GNU General Public License v3.0](LICENSE)
 
+## Upstream domains
+
+The canonical SeaDex website and API now use `https://seadex.moe`. The published workbook and optional sheet embed still use the separate, working `sheet.releases.moe` endpoint until SeaDex announces a replacement. The mirror does not rewrite the workbook's Google-hosted source.
+
 ## Credits
 
-- [SeaDex](https://releases.moe) ([source](https://github.com/seadex-moe/seadex)) — upstream project and data
+- [SeaDex](https://seadex.moe) ([source](https://github.com/seadex-moe/seadex)) — upstream project and data
 - [AniList](https://anilist.co) — anime metadata
