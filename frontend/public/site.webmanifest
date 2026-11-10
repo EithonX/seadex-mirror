@@ -1,7 +1,7 @@
 {
   "name": "SeaDex Mirror",
   "short_name": "SeaDex",
-  "description": "An unofficial resilience mirror for SeaDex, the anime release recommendation index at releases.moe.",
+  "description": "An unofficial resilience mirror for SeaDex, the anime release recommendation index at seadex.moe.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
