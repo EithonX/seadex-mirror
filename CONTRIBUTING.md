@@ -1,6 +1,6 @@
 # Contributing
 
-SeaDex Mirror is an unofficial static mirror of [SeaDex](https://releases.moe). Problems with the underlying recommendations or upstream records should normally be reported to the [SeaDex project](https://github.com/seadex-moe/seadex), not corrected by silently forking the data here.
+SeaDex Mirror is an unofficial static mirror of [SeaDex](https://seadex.moe). Problems with the underlying recommendations or upstream records should normally be reported to the [SeaDex project](https://github.com/seadex-moe/seadex), not corrected by silently forking the data here.
 
 ## Setup
 
