@@ -25,9 +25,9 @@
     "verify:surge-limits": "node scripts/verify-surge-limits.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260831.1",
+    "@cloudflare/workers-types": "5.20261107.1",
     "typescript": "6.0.3",
-    "vite": "7.3.6",
+    "vite": "7.3.7",
     "wrangler": "4.158.0"
   },
   "dependencies": {
@@ -41,7 +41,7 @@
     "node": "^24.0.0 || ^26.0.0"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true,
-    "workerd@1.20260828.1": true
+    "esbuild@0.28.2": true,
+    "workerd@1.20261104.1": true
   }
 }
