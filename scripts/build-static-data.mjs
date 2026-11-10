@@ -24,7 +24,7 @@ import {
   verifySnapshotManifest,
 } from "./lib/snapshot-integrity.mjs";
 
-const DEFAULT_SOURCE_BASE_URL = "https://releases.moe";
+const DEFAULT_SOURCE_BASE_URL = "https://seadex.moe";
 const DEFAULT_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const DEFAULT_SHEET_WORKBOOK_URL =
   "https://docs.google.com/spreadsheets/d/1emW2Zsb0gEtEHiub_YHpazvBd4lL4saxCwyPhbtxXYM/export?format=xlsx";
@@ -903,7 +903,7 @@ function buildStaticSnapshot(snapshot) {
       mirror: {
         sourceBaseUrl: snapshot.sourceBaseUrl,
         originalSite: snapshot.sourceBaseUrl,
-        attribution: "SeaDex data originates from releases.moe. AniList metadata is cached by this mirror.",
+        attribution: "SeaDex data originates from seadex.moe. AniList metadata is cached by this mirror.",
         disclaimer: "This is an unofficial community mirror built to stay readable when the upstream frontend or AniList path is unstable.",
       },
       counts: {
