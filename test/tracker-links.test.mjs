@@ -41,7 +41,7 @@ test("frontend action resolution prefers raw PocketBase fields over legacy deriv
   const torrent = {
     tracker: "AB",
     sourceUrl: "torrents.php?id=41682&torrentid=1236786",
-    url: "https://releases.moe/torrents.php?id=41682&torrentid=1236786",
+    url: "https://seadex.moe/torrents.php?id=41682&torrentid=1236786",
     sourceGroupedUrl: null,
     groupedUrl: null,
   };
