@@ -56,12 +56,12 @@ test("source fingerprint tracks normalized workbook content", () => {
   const seaDexFingerprint = sha256Text("same-seadex");
   assert.notEqual(
     buildSourceFingerprint({
-      sourceBaseUrl: "https://releases.moe",
+      sourceBaseUrl: "https://seadex.moe",
       seaDexFingerprint,
       workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "A" }] }),
     }),
     buildSourceFingerprint({
-      sourceBaseUrl: "https://releases.moe",
+      sourceBaseUrl: "https://seadex.moe",
       seaDexFingerprint,
       workbookContentSha256: buildWorkbookContentFingerprint({ sheets: [{ name: "B" }] }),
     }),
@@ -72,7 +72,7 @@ test("source fingerprint includes the source origin that is rendered into entry 
   const seaDexFingerprint = sha256Text("same-seadex");
   const workbookContentSha256 = sha256Text("same-workbook");
   const first = buildSourceFingerprint({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     seaDexFingerprint,
     workbookContentSha256,
   });
@@ -93,12 +93,12 @@ test("source revision captures lightweight SeaDex guards and workbook identity",
   };
   const workbookContentSha256 = sha256Text("workbook");
   const revision = buildSourceRevision({
-    sourceBaseUrl: "https://releases.moe/",
+    sourceBaseUrl: "https://seadex.moe/",
     seaDexGuard: guard,
     workbookContentSha256,
   });
 
-  assert.equal(revision.sourceBaseUrl, "https://releases.moe");
+  assert.equal(revision.sourceBaseUrl, "https://seadex.moe");
   assert.equal(revision.seaDex.listIdCount, 2);
   assert.equal(revision.seaDex.entries.count, 2);
   assert.equal(revision.seaDex.torrents.count, 3);
@@ -111,7 +111,7 @@ test("source revision captures lightweight SeaDex guards and workbook identity",
 
 test("source revision rejects internally inconsistent or malformed guards", () => {
   const base = {
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     workbookContentSha256: sha256Text("workbook"),
   };
 

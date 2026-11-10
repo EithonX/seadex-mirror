@@ -3,8 +3,8 @@ export const COMPACT_LAYOUT_MEDIA_QUERY = "(max-width: 760px)";
 export const SEARCH_RESULTS_LIMIT = 10;
 export const THEME_KEY = "seadex-mirror-theme";
 
-export const UPSTREAM_SITE_URL = "https://releases.moe/";
-export const UPSTREAM_ABOUT_URL = "https://releases.moe/about/";
+export const UPSTREAM_SITE_URL = "https://seadex.moe/";
+export const UPSTREAM_ABOUT_URL = "https://seadex.moe/about/";
 export const UPSTREAM_SHEET_URL = "https://sheet.releases.moe/";
 
 export const DEVELOPER_GITHUB_URL = "https://github.com/EithonX";
