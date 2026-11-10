@@ -98,7 +98,7 @@ test("SeaDex listIDs uses the first-party route and does not impersonate a brows
   };
 
   const ids = await fetchSeaDexListIds({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     retryLimit: 0,
     fetchImpl,
   });
@@ -126,7 +126,7 @@ test("SeaDex collection revision captures count plus deterministic latest mutati
   };
 
   const revision = await fetchSeaDexCollectionRevision({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     collection: "torrents",
     retryLimit: 0,
     fetchImpl,
@@ -156,7 +156,7 @@ test("SeaDex entry crawl uses deterministic alID pagination with expanded torren
   };
 
   const snapshot = await fetchSeaDexEntries({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     pageSize: 2,
     retryLimit: 0,
     fetchImpl,
@@ -183,7 +183,7 @@ test("SeaDex entry crawl rejects an incomplete paginated collection", async () =
 
   await assert.rejects(
     fetchSeaDexEntries({
-      sourceBaseUrl: "https://releases.moe",
+      sourceBaseUrl: "https://seadex.moe",
       pageSize: 100,
       retryLimit: 0,
       fetchImpl,
@@ -195,7 +195,7 @@ test("SeaDex entry crawl rejects an incomplete paginated collection", async () =
 test("SeaDex mutation guard consistency requires listIDs and entry counts to agree", async () => {
   const fetchImpl = createStableSourceFetch({ entries: [entry(1), entry(2)], torrentCount: 0 });
   const guard = await fetchSeaDexMutationGuard({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     retryLimit: 0,
     fetchImpl,
   });
@@ -222,14 +222,14 @@ test("SeaDex consistent capture can reuse a preflight guard without weakening th
   };
 
   const initialGuard = await fetchSeaDexMutationGuard({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     retryLimit: 0,
     fetchImpl,
   });
   listIdCalls = 0;
 
   const snapshot = await fetchConsistentSeaDexSnapshot({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     pageSize: 500,
     maxAttempts: 4,
     retryLimit: 0,
@@ -256,7 +256,7 @@ test("SeaDex consistent capture performs one full crawl when before/after guards
   };
 
   const snapshot = await fetchConsistentSeaDexSnapshot({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     pageSize: 500,
     maxAttempts: 4,
     retryLimit: 0,
@@ -308,7 +308,7 @@ test("SeaDex consistent capture retries the full crawl when a mutation occurs mi
   };
 
   const snapshot = await fetchConsistentSeaDexSnapshot({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     pageSize: 500,
     maxAttempts: 4,
     retryLimit: 0,
@@ -334,7 +334,7 @@ test("SeaDex consistent capture retries a guard whose ID count disagrees with Po
   };
 
   const snapshot = await fetchConsistentSeaDexSnapshot({
-    sourceBaseUrl: "https://releases.moe",
+    sourceBaseUrl: "https://seadex.moe",
     pageSize: 500,
     maxAttempts: 3,
     retryLimit: 0,
@@ -352,7 +352,7 @@ test("SeaDex consistent capture validates exact trs versus expand.trs parity aft
 
   await assert.rejects(
     fetchConsistentSeaDexSnapshot({
-      sourceBaseUrl: "https://releases.moe",
+      sourceBaseUrl: "https://seadex.moe",
       pageSize: 500,
       maxAttempts: 2,
       retryLimit: 0,
