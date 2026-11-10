@@ -198,8 +198,6 @@ jobs:
           EXPECTED_SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot-id }}
           EXPECTED_MANIFEST_SHA256: ${{ steps.snapshot.outputs.manifest-sha }}
           EXPECTED_SITE_FINGERPRINT: ${{ steps.snapshot.outputs.site-fingerprint }}
-          DEPLOY_VERIFY_ATTEMPTS: '15'
-          DEPLOY_VERIFY_DELAY_MS: '3000'
         run: npm run verify:deployed-site
 
       - name: Deploy Surge mirror
