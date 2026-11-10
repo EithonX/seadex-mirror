@@ -1,5 +1,4 @@
 import { readResponseBuffer } from "./lib/http.mjs";
-import { assertDeployedStatusMatches } from "./lib/deployed-status.mjs";
 import { sha256Buffer, validateSnapshotManifest } from "./lib/snapshot-integrity.mjs";
 import { validateSiteBuildDescriptor } from "./lib/site-build.mjs";
 
@@ -117,19 +116,15 @@ async function main() {
     console.log(`OK: ${path} matches the manifest.`);
   }
 
-  await retryCheck("/mirror-data/status.json", async () => {
-    const response = await fetchResponse(`${baseUrl}/mirror-data/status.json`);
-    assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
-    const bytes = await readResponseBuffer(response, {
-      maxBytes: 2 * 1024 * 1024,
-      label: "status.json",
-    });
-    const value = parseJson(bytes.toString("utf8"), "status.json");
-    // Stable aliases can briefly return the previous snapshot after publication.
-    // Retry stale identities just like transient fetch failures, but never accept them.
-    assertDeployedStatusMatches(value, manifestResult.manifest, EXPECTED_SNAPSHOT_ID);
-    return value;
-  });
+  const status = await fetchJsonWithRetry(`${baseUrl}/mirror-data/status.json`, "status.json", 2 * 1024 * 1024);
+  if (EXPECTED_SNAPSHOT_ID) {
+    assert(status?.snapshot?.id === EXPECTED_SNAPSHOT_ID, "status.json snapshot ID differs from expected snapshot");
+  }
+  assert(status?.snapshot?.id === manifestResult.manifest.snapshotId, "status.json snapshot ID differs from manifest");
+  assert(
+    status?.snapshot?.sourceFingerprint === manifestResult.manifest.sourceFingerprint,
+    "status.json source fingerprint differs from manifest",
+  );
 
   if (responsesWithCacheControl === 0 && checkedCacheHeaders > 0) {
     throw new Error("Cache-Control is missing from every checked mirror-data response.");
@@ -166,6 +161,15 @@ function selectVerificationSample(files) {
   assert(entryFiles.length > 0, "manifest contains no entry JSON files");
   required.push(entryFiles[0].path, entryFiles[Math.floor(entryFiles.length / 2)].path, entryFiles.at(-1).path);
   return [...new Set(required)];
+}
+
+async function fetchJsonWithRetry(url, label, maxBytes) {
+  return retryCheck(label, async () => {
+    const response = await fetchResponse(url);
+    assert(response.status === 200, `expected HTTP 200, got ${response.status}`);
+    const bytes = await readResponseBuffer(response, { maxBytes, label });
+    return parseJson(bytes.toString("utf8"), label);
+  });
 }
 
 async function fetchResponse(url) {
